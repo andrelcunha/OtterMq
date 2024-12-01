@@ -18,4 +18,17 @@ To install OtterMq, clone the repository and build it using Go:
 ```bash
 git clone https://github.com/yourusername/ottermq.git
 cd ottermq
-make build
+make build && make install
+```
+
+## Usage
+Run the broker:
+```sh
+ottermq
+```
+
+## License
+OtterMq is released under the MIT License. See ￼LICENSE for more information.
+
+## Contact
+For any questions, suggestions, or issues, please open an issue in the repository.
