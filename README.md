@@ -1,3 +1,4 @@
+[![Go](https://github.com/andrelcunha/OtterMq/actions/workflows/go.yml/badge.svg)](https://github.com/andrelcunha/OtterMq/actions/workflows/go.yml)
 # OtterMq
 
 **OtterMq** is a high-performance message broker written in Golang, inspired by RabbitMq. It aims to provide a reliable, scalable, and easy-to-use messaging solution for distributed systems.
