@@ -6,41 +6,22 @@ import (
 	"strconv"
 
 	"github.com/andrelcunha/ottermq/pkg/config"
+	"github.com/andrelcunha/ottermq/pkg/libs/models"
 )
 
 type Broker struct {
 	listener  net.Listener
 	clients   []net.Conn
 	config    *config.Config
-	exchanges map[string]*Exchange
-	queues    map[string]*Queue
+	exchanges map[string]*models.Exchange
+	queues    map[string]*models.Queue
 }
-
-type Exchange struct {
-	Name   string
-	Type   ExchangeType
-	Queues []*Queue
-}
-
-type Queue struct {
-	Name     string
-	Messages []string
-}
-
-type ExchangeType string
-
-const (
-	DIRECT  ExchangeType = "direct"
-	TOPIC   ExchangeType = "topic"
-	FANOUT  ExchangeType = "fanout"
-	HEADERS ExchangeType = "headers"
-)
 
 func NewBroker(config *config.Config) *Broker {
 	return &Broker{
 		config:    config,
-		exchanges: make(map[string]*Exchange),
-		queues:    make(map[string]*Queue),
+		exchanges: make(map[string]*models.Exchange),
+		queues:    make(map[string]*models.Queue),
 	}
 }
 
@@ -100,15 +81,15 @@ func (b *Broker) handleClient(conn net.Conn) {
 	}
 }
 
-func (b *Broker) AddExchange(name string, typ ExchangeType) {
-	b.exchanges[name] = &Exchange{
+func (b *Broker) AddExchange(name string, typ models.ExchangeType) {
+	b.exchanges[name] = &models.Exchange{
 		Name: name,
 		Type: typ,
 	}
 }
 
 func (b *Broker) AddQueue(name string) {
-	b.queues[name] = &Queue{
+	b.queues[name] = &models.Queue{
 		Name:     name,
 		Messages: []string{},
 	}

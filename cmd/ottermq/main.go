@@ -8,6 +8,7 @@ import (
 
 	"github.com/andrelcunha/ottermq/internal/broker"
 	"github.com/andrelcunha/ottermq/pkg/config"
+	"github.com/andrelcunha/ottermq/pkg/libs/models"
 )
 
 func main() {
@@ -26,7 +27,7 @@ func main() {
 	b := broker.NewBroker(cfg)
 
 	// Adding exchanges and queues
-	b.AddExchange("orderExchange", broker.DIRECT)
+	b.AddExchange("orderExchange", models.DIRECT)
 	b.AddQueue("orderQueue")
 	b.BindQueue("orderExchange", "orderQueue")
 
