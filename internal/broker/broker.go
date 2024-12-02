@@ -86,7 +86,7 @@ func (b *Broker) handleClient(conn net.Conn) {
 		n, err := conn.Read(buf)
 		if err != nil {
 			if err.Error() == "EOF" {
-				fmt.Println("Client disconnected")
+				// fmt.Println("Client disconnected")
 			} else {
 				fmt.Println("Error reading from client:", err)
 			}
