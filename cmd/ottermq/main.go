@@ -18,17 +18,28 @@ func main() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	// Initialize configuration
-	config := &config.Config{
+	cfg := &config.Config{
 		Port: 5672,
 	}
-	fmt.Println("Config Port: ", config.Port)
 
 	// Initialize the message broker
-	broker := broker.NewBroker(config)
-	go broker.Start()
+	b := broker.NewBroker(cfg)
+
+	// Adding exchanges and queues
+	b.AddExchange("orderExchange", broker.DIRECT)
+	b.AddQueue("orderQueue")
+	b.BindQueue("orderExchange", "orderQueue")
+
+	go b.Start()
+
+	// Rooute a test message
+	err := b.RouteMessage("orderExchange", "orderQueue", "Order created")
+	if err != nil {
+		fmt.Println("Error routing message:", err)
+	}
 
 	// Wait for a signal to shutdown
 	<-signals
 	fmt.Println("Shutting down OtterMq...")
-	broker.Stop()
+	b.Stop()
 }
