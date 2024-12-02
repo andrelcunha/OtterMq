@@ -4,43 +4,25 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/andrelcunha/ottermq/pkg/config"
+	"github.com/andrelcunha/ottermq/pkg/libs/models"
 )
 
 type Broker struct {
 	listener  net.Listener
 	clients   []net.Conn
 	config    *config.Config
-	exchanges map[string]*Exchange
-	queues    map[string]*Queue
+	exchanges map[string]*models.Exchange
+	queues    map[string]*models.Queue
 }
-
-type Exchange struct {
-	Name   string
-	Type   ExchangeType
-	Queues []*Queue
-}
-
-type Queue struct {
-	Name     string
-	Messages []string
-}
-
-type ExchangeType string
-
-const (
-	DIRECT  ExchangeType = "direct"
-	TOPIC   ExchangeType = "topic"
-	FANOUT  ExchangeType = "fanout"
-	HEADERS ExchangeType = "headers"
-)
 
 func NewBroker(config *config.Config) *Broker {
 	return &Broker{
 		config:    config,
-		exchanges: make(map[string]*Exchange),
-		queues:    make(map[string]*Queue),
+		exchanges: make(map[string]*models.Exchange),
+		queues:    make(map[string]*models.Queue),
 	}
 }
 
@@ -95,20 +77,75 @@ func (b *Broker) handleClient(conn net.Conn) {
 		message := string(buf[:n])
 		fmt.Printf("Received: %s\n", message)
 
-		response := fmt.Sprintf("Message received: %s", message)
+		response, err := b.processCommand(message)
+		if err != nil {
+			response = "ERROR:" + err.Error()
+		}
 		conn.Write([]byte(response + "\n"))
 	}
 }
 
-func (b *Broker) AddExchange(name string, typ ExchangeType) {
-	b.exchanges[name] = &Exchange{
+func (b *Broker) processCommand(command string) (string, error) {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("Invalid command")
+	}
+
+	switch parts[0] {
+	case "CREATE_EXCHANGE":
+		if len(parts) != 3 {
+			return "", fmt.Errorf("Invalid %s command", parts[0])
+		}
+		name := parts[1]
+		typ := parts[2]
+		b.AddExchange(name, models.ExchangeType(typ))
+		return fmt.Sprintf("Exchange %s of type %s created", name, typ), nil
+
+	case "CREATE_QUEUE":
+		if len(parts) != 2 {
+			return "", fmt.Errorf("Invalid %s command", parts[0])
+		}
+		name := parts[1]
+		b.AddQueue(name)
+		return fmt.Sprintf("Queue %s created", name), nil
+
+	case "BIND_QUEUE":
+		if len(parts) != 3 {
+			return "", fmt.Errorf("Invalid %s command", parts[0])
+		}
+		name := parts[1]
+		queueName := parts[2]
+		err := b.BindQueue(name, queueName)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Queue %s bound to exchange %s", queueName, name), err
+
+	// case "PUBLISH":
+	// 	if len(parts) < 3 {
+	// 		return "", fmt.Errorf("Invalid %s command", parts[0])
+	// 	}
+	// 	return b.publish(parts[1], parts[2], parts[3])
+	// case "SUBSCRIBE":
+	// 	if len(parts) < 2 {
+	// 		return "", fmt.Errorf("Invalid %s command", parts[0])
+	// 	}
+	// 	return b.subscribe(parts[1])
+	default:
+		return "", fmt.Errorf("Invalid %s command", parts[0])
+	}
+
+}
+
+func (b *Broker) AddExchange(name string, typ models.ExchangeType) {
+	b.exchanges[name] = &models.Exchange{
 		Name: name,
 		Type: typ,
 	}
 }
 
 func (b *Broker) AddQueue(name string) {
-	b.queues[name] = &Queue{
+	b.queues[name] = &models.Queue{
 		Name:     name,
 		Messages: []string{},
 	}
