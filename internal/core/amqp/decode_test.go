@@ -2,6 +2,7 @@ package amqp
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 )
 
@@ -140,5 +141,149 @@ func TestParseExchangeDeclareFrame_Flags(t *testing.T) {
 	}
 	if !msg.NoWait {
 		t.Errorf("Expected noWait=true, got false")
+	}
+}
+
+// Truncated variable-length fields: the declared length is read from the wire
+// and exceeds the bytes that follow. A short read from a bytes.Reader returns
+// no error, so these inputs used to be accepted with NUL padding.
+func TestDecodeTable_RejectsTruncatedFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"short string body", []byte{1, 'a', 's', 10, 'x'}},
+		{"long string body", []byte{1, 'a', 'S', 0, 0, 0, 9, 'x', 'y'}},
+		{"field name", []byte{5, 'a'}},
+		// Nested table that declares 6 bytes and carries 5: the short read is
+		// padded with NUL, and the padding is absorbed by the inner long-ish
+		// string, so nothing downstream reports a problem.
+		{"nested table", []byte{1, 'a', 'F', 0, 0, 0, 6, 1, 'b', 's', 3, 'y'}},
+		// Same with an array body: declared 6, carried 3, padding absorbed by
+		// the inner short string.
+		{"array", []byte{1, 'a', 'A', 0, 0, 0, 6, 's', 5, 'x'}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			table, err := DecodeTable(tt.data)
+			if err == nil {
+				t.Fatalf("DecodeTable(%v) = %q, want an error for truncated input", tt.data, table)
+			}
+		})
+	}
+}
+
+func TestDecodeArray_RejectsTruncatedElements(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"short string", []byte{'s', 10, 'x'}},
+		{"long string", []byte{'S', 0, 0, 0, 9, 'x', 'y'}},
+		// The NUL padding of a short table read is absorbed by the inner string.
+		{"nested table", []byte{'F', 0, 0, 0, 6, 1, 'b', 's', 3, 'y'}},
+		{"nested array", []byte{'A', 0, 0, 0, 6, 's', 5, 'x'}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			array, err := DecodeArray(tt.data)
+			if err == nil {
+				t.Fatalf("DecodeArray(%v) = %q, want an error for truncated input", tt.data, array)
+			}
+		})
+	}
+}
+
+func TestDecodeShortStr_RejectsTruncatedInput(t *testing.T) {
+	if got, err := DecodeShortStr(bytes.NewReader([]byte{10, 'x'})); err == nil {
+		t.Fatalf("DecodeShortStr = %q, want an error for a truncated string", got)
+	}
+}
+
+func TestDecodeLongStr_RejectsTruncatedInput(t *testing.T) {
+	if got, err := DecodeLongStr(bytes.NewReader([]byte{0, 0, 0, 9, 'x', 'y'})); err == nil {
+		t.Fatalf("DecodeLongStr = %q, want an error for a truncated string", got)
+	}
+}
+
+// Control cases: fields whose declared length matches the bytes present still
+// decode, so the truncation check cannot be satisfied by rejecting everything.
+func TestDecodeTable_AcceptsCompleteFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want map[string]interface{}
+	}{
+		{"short string", []byte{1, 'a', 's', 1, 'x'}, map[string]interface{}{"a": "x"}},
+		{"long string", []byte{1, 'a', 'S', 0, 0, 0, 2, 'x', 'y'}, map[string]interface{}{"a": "xy"}},
+		{"empty short string", []byte{1, 'a', 's', 0}, map[string]interface{}{"a": ""}},
+		{"multi byte field name", []byte{3, 'f', 'o', 'o', 's', 1, 'x'}, map[string]interface{}{"foo": "x"}},
+		{"nested table", []byte{1, 'a', 'F', 0, 0, 0, 5, 1, 'b', 's', 1, 'y'}, map[string]interface{}{"a": map[string]interface{}{"b": "y"}}},
+		{"array", []byte{1, 'a', 'A', 0, 0, 0, 3, 's', 1, 'z'}, map[string]interface{}{"a": []interface{}{"z"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeTable(tt.data)
+			if err != nil {
+				t.Fatalf("DecodeTable(%v) failed: %v", tt.data, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DecodeTable(%v) = %#v, want %#v", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeArray_AcceptsCompleteElements(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want []interface{}
+	}{
+		{"short string", []byte{'s', 1, 'x'}, []interface{}{"x"}},
+		{"long string", []byte{'S', 0, 0, 0, 2, 'x', 'y'}, []interface{}{"xy"}},
+		{"nested table", []byte{'F', 0, 0, 0, 5, 1, 'b', 's', 1, 'y'}, []interface{}{map[string]interface{}{"b": "y"}}},
+		{"nested array", []byte{'A', 0, 0, 0, 3, 's', 1, 'z'}, []interface{}{[]interface{}{"z"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeArray(tt.data)
+			if err != nil {
+				t.Fatalf("DecodeArray(%v) failed: %v", tt.data, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DecodeArray(%v) = %#v, want %#v", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeStr_AcceptsCompleteInput(t *testing.T) {
+	got, err := DecodeShortStr(bytes.NewReader([]byte{2, 'h', 'i'}))
+	if err != nil {
+		t.Fatalf("DecodeShortStr failed: %v", err)
+	}
+	if got != "hi" {
+		t.Errorf("DecodeShortStr = %q, want %q", got, "hi")
+	}
+
+	got, err = DecodeLongStr(bytes.NewReader([]byte{0, 0, 0, 2, 'h', 'i'}))
+	if err != nil {
+		t.Fatalf("DecodeLongStr failed: %v", err)
+	}
+	if got != "hi" {
+		t.Errorf("DecodeLongStr = %q, want %q", got, "hi")
+	}
+
+	got, err = DecodeLongStr(bytes.NewReader([]byte{0, 0, 0, 0}))
+	if err != nil {
+		t.Fatalf("DecodeLongStr with zero length failed: %v", err)
+	}
+	if got != "" {
+		t.Errorf("DecodeLongStr with zero length = %q, want an empty string", got)
 	}
 }
