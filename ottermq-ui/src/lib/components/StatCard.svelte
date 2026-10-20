@@ -9,7 +9,7 @@
 
 <div class="stat-card">
 	<div class="stat-data">
-		<span style:color={color}>
+		<span style:color>
 			{value}
 		</span>
 	</div>

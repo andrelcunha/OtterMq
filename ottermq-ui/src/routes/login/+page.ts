@@ -5,7 +5,7 @@ import type { PageLoad } from './$types';
 export const ssr = false;
 
 export const load: PageLoad = () => {
-    if (auth.token !== '') {
-        redirect(302, '/')
-    }
-}
+	if (auth.token !== '') {
+		redirect(302, '/');
+	}
+};

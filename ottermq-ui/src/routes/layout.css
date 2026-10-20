@@ -1,84 +1,84 @@
 body {
-    margin: 0
+	margin: 0;
 }
 
 main {
-    flex: 1;
-    padding: 14px;
-    min-width: 0;
+	flex: 1;
+	padding: 14px;
+	min-width: 0;
 }
 
 .small-square {
-    height: .7em;
-    width: .7em;
-    border: 1px solid lightslategray;
-    padding: 2px;
-    margin-right: 4px;
-    display: inline-block;
+	height: 0.7em;
+	width: 0.7em;
+	border: 1px solid lightslategray;
+	padding: 2px;
+	margin-right: 4px;
+	display: inline-block;
 }
 
 .small-square--green {
-    background-color: #0f0;
+	background-color: #0f0;
 }
 
 .small-square--yellow {
-    background-color: #ff9800;
+	background-color: #ff9800;
 }
 
 .small-square--red {
-    background-color: #c10015;
+	background-color: #c10015;
 }
 
 .small-square--gray {
-    background-color: #9e9e9e;
+	background-color: #9e9e9e;
 }
 
 /* Shared shell for data-list tables (Queues, Connections, Channels, ...).
    Scoped under .table-card so it never reaches the unrelated summary
    tables on the Overview page (those use .stats-card instead). */
 .table-card {
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    margin-top: 16px;
-    overflow-x: auto;
+	border: 1px solid var(--color-border);
+	border-radius: 4px;
+	margin-top: 16px;
+	overflow-x: auto;
 }
 
 .table-card table {
-    width: 100%;
-    border-collapse: collapse;
+	width: 100%;
+	border-collapse: collapse;
 }
 
 .table-card th,
 .table-card td {
-    padding: 8px 16px;
+	padding: 8px 16px;
 }
 
 .table-card th {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--color-text-muted);
-    border-bottom: 1px solid var(--color-border);
+	font-size: 12px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--color-text-muted);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .table-card thead th:not(:last-child) {
-    border-right: 1px solid var(--color-border);
+	border-right: 1px solid var(--color-border);
 }
 
 .table-card tbody tr:not(:last-child) td {
-    border-bottom: 1px solid var(--color-border);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .table-card tbody td:not(:last-child) {
-    border-right: 1px solid var(--color-border);
+	border-right: 1px solid var(--color-border);
 }
 
 .table-card .num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
 }
 
 .table-card .state {
-    text-align: center;
+	text-align: center;
 }
