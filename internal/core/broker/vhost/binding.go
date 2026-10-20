@@ -131,7 +131,8 @@ func (vh *VHost) UnbindQueue(exchangeName, queueName, routingKey string, args ma
 		return err
 	}
 	switch exchange.Typ {
-	case DIRECT:
+	case DIRECT, TOPIC:
+		// Topic bindings are stored by their binding key, like direct ones.
 		err := vh.DeleteBindingUnlocked(exchange, queueName, routingKey, args)
 		if err != nil {
 			return err
@@ -143,6 +144,8 @@ func (vh *VHost) UnbindQueue(exchangeName, queueName, routingKey string, args ma
 		if err != nil {
 			return err
 		}
+	default:
+		return errors.NewChannelError(fmt.Sprintf("exchange '%s' has unsupported type '%s'", exchangeName, exchange.Typ), uint16(amqp.NOT_IMPLEMENTED), uint16(amqp.EXCHANGE), uint16(amqp.QUEUE_UNBIND))
 	}
 
 	if exchange.Props.Durable && queue.Props.Durable {
