@@ -41,8 +41,8 @@ func ListPermissions(c *fiber.Ctx) error {
 // @Router /admin/permissions/{vhost}/{username} [get]
 // @Security BearerAuth
 func GetPermission(c *fiber.Ctx) error {
-	vhost := c.Params("vhost")
-	username := c.Params("username")
+	vhost := decodedParam(c, "vhost")
+	username := decodedParam(c, "username")
 	ok, err := persistdb.HasVHostAccess(username, vhost)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{Error: err.Error()})
@@ -68,8 +68,8 @@ func GetPermission(c *fiber.Ctx) error {
 // @Router /admin/permissions/{vhost}/{username} [put]
 // @Security BearerAuth
 func GrantPermission(c *fiber.Ctx) error {
-	vhost := c.Params("vhost")
-	username := c.Params("username")
+	vhost := decodedParam(c, "vhost")
+	username := decodedParam(c, "username")
 	if err := persistdb.GrantVHostAccess(username, vhost); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{Error: err.Error()})
 	}
@@ -90,8 +90,8 @@ func GrantPermission(c *fiber.Ctx) error {
 // @Router /admin/permissions/{vhost}/{username} [delete]
 // @Security BearerAuth
 func RevokePermission(c *fiber.Ctx) error {
-	vhost := c.Params("vhost")
-	username := c.Params("username")
+	vhost := decodedParam(c, "vhost")
+	username := decodedParam(c, "username")
 	if err := persistdb.RevokeVHostAccess(username, vhost); err != nil {
 		status := fiber.StatusInternalServerError
 		if err.Error() == "no permission found for user '"+username+"' on vhost '"+vhost+"'" {

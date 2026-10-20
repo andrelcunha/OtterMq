@@ -75,7 +75,7 @@ func GetUsers(c *fiber.Ctx) error {
 // @Router /admin/users/{username} [get]
 // @Security BearerAuth
 func GetUser(c *fiber.Ctx) error {
-	username := c.Params("username")
+	username := decodedParam(c, "username")
 	u, err := persistdb.GetUserByUsername(username)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(models.ErrorResponse{Error: "User not found"})
@@ -100,7 +100,7 @@ func GetUser(c *fiber.Ctx) error {
 // @Router /admin/users/{username} [delete]
 // @Security BearerAuth
 func DeleteUser(c *fiber.Ctx) error {
-	username := c.Params("username")
+	username := decodedParam(c, "username")
 	if err := persistdb.DeleteUser(username); err != nil {
 		status := fiber.StatusInternalServerError
 		if err.Error() == "user '"+username+"' not found" {
@@ -127,7 +127,7 @@ func DeleteUser(c *fiber.Ctx) error {
 // @Router /admin/users/{username}/password [put]
 // @Security BearerAuth
 func ChangePassword(c *fiber.Ctx) error {
-	username := c.Params("username")
+	username := decodedParam(c, "username")
 	var req models.UserPasswordUpdateRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{Error: err.Error()})
