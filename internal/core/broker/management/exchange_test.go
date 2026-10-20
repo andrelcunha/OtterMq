@@ -198,6 +198,30 @@ func TestGetExchange(t *testing.T) {
 	assert.Equal(t, "value", dto.Arguments["x-custom"])
 }
 
+func TestListExchanges_IncludesProperties(t *testing.T) {
+	broker := setupTestBroker(t)
+	service := NewService(broker)
+
+	_, err := service.CreateExchange("/", "props-exchange", models.CreateExchangeRequest{
+		ExchangeType: "topic",
+		Durable:      true,
+		AutoDelete:   true,
+	})
+	require.NoError(t, err)
+
+	list, err := service.ListExchanges()
+	require.NoError(t, err)
+
+	for _, ex := range list {
+		if ex.Name == "props-exchange" {
+			assert.True(t, ex.Durable, "durable flag missing from list")
+			assert.True(t, ex.AutoDelete, "auto_delete flag missing from list")
+			return
+		}
+	}
+	t.Fatal("created exchange not found in list")
+}
+
 func TestListExchanges(t *testing.T) {
 	broker := setupTestBroker(t)
 	service := NewService(broker)

@@ -18,6 +18,11 @@ func (s *Service) ListExchanges() ([]models.ExchangeDTO, error) {
 				Name:  exchange.NameOrAlias(),
 				Type:  string(exchange.Typ),
 			}
+			if exchange.Props != nil {
+				dto.Durable = exchange.Props.Durable
+				dto.AutoDelete = exchange.Props.AutoDelete
+				dto.Internal = exchange.Props.Internal
+			}
 			dtos = append(dtos, dto)
 		}
 	}
