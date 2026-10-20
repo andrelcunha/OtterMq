@@ -15,7 +15,8 @@
 		getData();
 		getChats();
 		const interval = setInterval(() => {
-			(getData(), getChats());
+			getData();
+			getChats();
 		}, 5000);
 		return () => clearInterval(interval);
 	});

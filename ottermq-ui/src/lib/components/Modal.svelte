@@ -19,9 +19,9 @@
 
 {#if open}
 	<div class="backdrop" onclick={onclose} role="presentation">
-		<!-- svelte-ignore a11y_click_events_have_key_events -- this only stops the
-		     backdrop's close-on-click from firing for clicks inside the dialog;
-		     it's not a user interaction of its own -->
+		<!-- stopPropagation only keeps clicks inside the dialog from reaching the
+		     backdrop's close-on-click; it isn't a user interaction of its own -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
 			class="modal"
 			onclick={(e) => e.stopPropagation()}

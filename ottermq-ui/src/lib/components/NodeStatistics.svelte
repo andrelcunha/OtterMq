@@ -34,13 +34,14 @@
 				<tr>
 					<td> Name </td>
 
-					<td> Gorotines </td>
+					<td> Goroutines </td>
 					<td> File Descriptors </td>
 					<td> Memory Used </td>
+					<td> Uptime </td>
 				</tr>
 			</thead>
 			<tbody>
-				{#each nodes as node}
+				{#each nodes as node (node.name)}
 					<tr>
 						<td>
 							{node.name}
@@ -54,6 +55,9 @@
 						</td>
 						<td>
 							<span> {node.memory_usage} </span>
+						</td>
+						<td>
+							<span>{uptime}</span>
 						</td>
 					</tr>
 				{/each}

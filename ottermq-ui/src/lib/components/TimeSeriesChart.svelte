@@ -44,7 +44,7 @@
 			maximumFractionDigits: digits
 		});
 
-	const axisFormat = (v: number) => nf(v, decimals ?? 0);
+	const axisFormat = (v: number) => (format ? format(v) : nf(v, decimals ?? 0));
 	const tooltipFormat = (v: number) =>
 		`${nf(v, tooltipDecimals ?? decimals ?? 0)}${unit ? ` ${unit}` : ''}`;
 
