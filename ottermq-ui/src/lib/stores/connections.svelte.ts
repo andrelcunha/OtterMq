@@ -15,7 +15,7 @@ export async function getConnections(): Promise<ConnectionData[] | null> {
 	try {
 		const response = await api.get('/api/connections');
 		const data = await response.json();
-		return Array.isArray(data?.connections) ? data.connections : null;
+		return Array.isArray(data?.connections) ? data.connections : [];
 	} catch (err) {
 		console.error('Failed to fetch: ', err);
 	}

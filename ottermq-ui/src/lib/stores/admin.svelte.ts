@@ -1,4 +1,4 @@
-import { api } from '$lib/services/api';
+import { api, seg } from '$lib/services/api';
 export interface UserData {
 	id: number;
 	username: string;
@@ -23,7 +23,7 @@ export async function getUsers(): Promise<UserData[] | null> {
 	try {
 		const response = await api.get('/api/admin/users');
 		const data = await response.json();
-		return Array.isArray(data?.users) ? data.users : null;
+		return Array.isArray(data?.users) ? data.users : [];
 	} catch (err) {
 		console.error('Failed to fetch', err);
 	}
@@ -35,22 +35,37 @@ export async function addUser(req: UserCreateRequest): Promise<void> {
 	await api.post('/api/admin/users', req);
 }
 
-// delete user
+export async function deleteUser(username: string): Promise<void> {
+	await api.delete(`/api/admin/users/${seg(username)}`);
+}
 
-// change password
+export async function changePassword(
+	username: string,
+	password: string,
+	confirmPassword: string
+): Promise<void> {
+	await api.put(`/api/admin/users/${seg(username)}/password`, {
+		password,
+		confirm_password: confirmPassword
+	});
+}
 
 // fetch permissions
 export async function getPermission(): Promise<PermissionData[] | null> {
 	try {
 		const response = await api.get('/api/admin/permissions');
 		const data = await response.json();
-		return Array.isArray(data?.users) ? data.users : null;
+		return Array.isArray(data?.permissions) ? data.permissions : [];
 	} catch (err) {
 		console.error('Failed to fetch', err);
 	}
 	return null;
 }
 
-// grant permission
+export async function grantPermission(vhost: string, username: string): Promise<void> {
+	await api.put(`/api/admin/permissions/${seg(vhost)}/${seg(username)}`);
+}
 
-// revoke permission
+export async function revokePermission(vhost: string, username: string): Promise<void> {
+	await api.delete(`/api/admin/permissions/${seg(vhost)}/${seg(username)}`);
+}

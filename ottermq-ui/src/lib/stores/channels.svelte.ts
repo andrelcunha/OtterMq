@@ -22,7 +22,7 @@ export async function getChannels(): Promise<ChannelData[] | null> {
 	try {
 		const response = await api.get('/api/channels');
 		const data = await response.json();
-		return Array.isArray(data?.channels) ? data.channels : null;
+		return Array.isArray(data?.channels) ? data.channels : [];
 	} catch (err) {
 		console.error('Failed to fetch: ', err);
 	}
