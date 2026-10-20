@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Feedback from '$lib/components/Feedback.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import '../layout.css';
 
@@ -11,6 +12,7 @@
 		{@render children()}
 	</main>
 </div>
+<Feedback />
 
 <style>
 	.shell {

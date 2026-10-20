@@ -5,23 +5,28 @@
 	import { auth, logout } from '$lib/stores/auth.svelte';
 	import type { BrokerData } from '$lib/stores/overview.svelte';
 	import { fetchBrokerData } from '$lib/stores/overview.svelte';
-	import { fetchVhosts, vhosts } from '$lib/stores/vhosts.svelte';
+	import { fetchVhosts, setSelectedVhost, vhosts } from '$lib/stores/vhosts.svelte';
 
-	const menu = [
-		{ label: 'OVERVIEW', href: resolve('/') },
-		{ label: 'CONNECTIONS', href: resolve('/connections') },
-		{ label: 'CHANNELS', href: resolve('/channels') },
-		{ label: 'EXCHANGES', href: resolve('/exchanges') },
-		{ label: 'QUEUES', href: resolve('/queues') },
-		{ label: 'ADMIN', href: resolve('/admin') }
-	];
+	const isAdmin = $derived(auth.role === 'admin');
 
-	const username = auth.username || 'annonymous';
+	// The Admin page only works for administrators (the API rejects everyone else),
+	// so only show it to them.
+	const menu = $derived(
+		[
+			{ label: 'OVERVIEW', href: resolve('/') },
+			{ label: 'CONNECTIONS', href: resolve('/connections') },
+			{ label: 'CHANNELS', href: resolve('/channels') },
+			{ label: 'EXCHANGES', href: resolve('/exchanges') },
+			{ label: 'QUEUES', href: resolve('/queues') },
+			{ label: 'ADMIN', href: resolve('/admin'), adminOnly: true }
+		].filter((item) => !item.adminOnly || isAdmin)
+	);
+
+	const username = $derived(auth.username || 'anonymous');
 
 	let broker = $state<BrokerData | null>(null);
 	const version = $derived(broker?.version ?? '');
 	const goVersion = $derived(getGoVersion());
-	const vhost = $derived(vhosts.selected);
 
 	async function getData() {
 		broker = await fetchBrokerData();
@@ -72,12 +77,20 @@
 	</nav>
 
 	<div class="rail-foot">
-		{#if vhost}
-			<div class="rail-vhost">
-				<span class="k">VHost</span>
-				<span class="v">{vhost}</span>
-			</div>
-		{/if}
+		<label class="rail-vhost">
+			<span class="k">VHost</span>
+			<select
+				value={vhosts.selected}
+				onchange={(e) => setSelectedVhost(e.currentTarget.value)}
+				disabled={vhosts.items.length === 0}
+			>
+				{#each vhosts.items as v (v.name)}
+					<option value={v.name}>{v.name}</option>
+				{:else}
+					<option value={vhosts.selected}>{vhosts.selected}</option>
+				{/each}
+			</select>
+		</label>
 		<div class="rail-user">
 			<span>User: <strong>{username}</strong></span>
 			<button class="rail-logout" onclick={handleLogout}>Logout</button>
@@ -161,6 +174,18 @@
 		border-radius: 6px;
 		padding: 7px 10px;
 		font-size: 0.76rem;
+	}
+	.rail-vhost select {
+		font: inherit;
+		color: inherit;
+		background: transparent;
+		border: none;
+		text-align: right;
+		max-width: 60%;
+		cursor: pointer;
+	}
+	.rail-vhost select option {
+		color: var(--color-text);
 	}
 	.rail-vhost .k {
 		opacity: 0.65;

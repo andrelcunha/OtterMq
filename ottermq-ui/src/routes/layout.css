@@ -82,3 +82,189 @@ main {
 .table-card .state {
 	text-align: center;
 }
+
+/* Shared controls for forms, dialogs and page toolbars. */
+.page-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	font: inherit;
+	font-size: 0.85rem;
+	font-weight: 600;
+	padding: 7px 14px;
+	border-radius: 6px;
+	border: 1px solid var(--color-border);
+	background: var(--color-surface);
+	color: var(--color-text);
+	cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+	border-color: var(--color-text-muted);
+}
+.btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.btn-primary {
+	background: var(--color-accent);
+	border-color: var(--color-accent);
+	color: var(--color-accent-contrast);
+}
+.btn-danger {
+	background: #c10015;
+	border-color: #c10015;
+	color: #fff;
+}
+
+.form {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.form label,
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--color-text-muted);
+}
+.form label.check {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	color: var(--color-text);
+	font-weight: 500;
+}
+.form-row {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+}
+.form-row > * {
+	flex: 1;
+	min-width: 140px;
+}
+.form input:not([type='checkbox']),
+.form select,
+.form textarea {
+	font: inherit;
+	font-size: 0.9rem;
+	font-weight: 400;
+	color: var(--color-text);
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: 6px;
+	padding: 7px 10px;
+}
+.form input:focus-visible,
+.form select:focus-visible,
+.form textarea:focus-visible,
+.btn:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 1px;
+}
+.form-hint {
+	font-size: 0.75rem;
+	font-weight: 400;
+}
+.form-error {
+	margin: 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	font-size: 0.85rem;
+	color: #c10015;
+	background: color-mix(in srgb, #c10015 8%, transparent);
+}
+.form-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+/* A bordered section under a table, for the selected row's details. */
+.panel {
+	border: 1px solid var(--color-border);
+	border-radius: 4px;
+	margin-top: 16px;
+	padding: 16px 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+.panel h2 {
+	font-size: 1.1rem;
+	font-weight: 600;
+	margin: 0;
+}
+
+/* Clickable table rows that select an item. */
+.table-card tbody tr.selectable {
+	cursor: pointer;
+}
+.table-card tbody tr.selectable:hover td {
+	background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+.table-card tbody tr.selected td {
+	background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.table-card .action {
+	text-align: center;
+	white-space: nowrap;
+}
+.row-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: none;
+	padding: 4px;
+	border-radius: 4px;
+	color: var(--color-text-muted);
+	cursor: pointer;
+}
+.row-action svg {
+	width: 18px;
+	height: 18px;
+}
+.row-action:hover:not(:disabled) {
+	color: var(--color-text);
+}
+.row-action:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.empty-row td {
+	text-align: center;
+	color: var(--color-text-muted);
+}
+
+/* Text-styled button, e.g. a row's name that selects it (keyboard-reachable). */
+.link {
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	text-align: left;
+}
+.link:hover {
+	text-decoration: underline;
+}
+.link:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 2px;
+}
