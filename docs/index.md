@@ -4,7 +4,7 @@ title: OtterMQ Project Overview
 
 ## 🦦 OtterMQ
 
-OtterMQ is a high-performance message broker written in Go, aiming for compatibility with the AMQP 0.9.1 protocol and interoperability with RabbitMQ clients. It includes a broker backend and a modern management UI built with Vue 3 + Quasar.
+OtterMQ is a high-performance message broker written in Go, aiming for compatibility with the AMQP 0.9.1 protocol and interoperability with RabbitMQ clients. It includes a broker backend and a modern management UI built with SvelteKit.
 
 This site tracks project status and documentation for users and contributors. For full source code and issue tracking, visit the GitHub repository:
 
@@ -28,7 +28,7 @@ This site tracks project status and documentation for users and contributors. Fo
 - Quality of Service (QoS) with prefetch limits
 - Message acknowledgments, rejections, and recovery
 - Pluggable persistence layer (JSON today; Memento WAL planned)
-- Built-in management UI (Vue + Quasar)
+- Built-in management UI (SvelteKit)
 - Supports **multiple virtual hosts** for tenant isolation
 - Low memory footprint with smart buffering and backpressure
 
@@ -103,7 +103,7 @@ A [Prometheus/Grafana integration](./prometheus) is available as an optional mon
 ## Getting started
 
 - Build and run using `make build-all` then `make run`
-- Development: `make run-dev` for the broker and `quasar dev` for the UI in `ottermq_ui/`
+- Development: `make run-dev` for the broker and `npm run dev` for the UI in `web/ui/`
 
 See the repository README for detailed steps and configuration options.
 
