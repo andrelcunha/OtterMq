@@ -2,6 +2,8 @@ package web
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/ottermq/ottermq/internal/core/broker"
 	"github.com/ottermq/ottermq/web/docs"
@@ -48,13 +50,15 @@ func (ws *WebServer) SetupApp(logFile *os.File) *fiber.App {
 	// ws.Client = conn
 	app := ws.configServer(logFile)
 
-	// Serve static files (ui -- Vue frontend)
+	// Serve the management UI (SvelteKit single-page app built from web/ui)
 	uiPath := ws.config.UIPath
+	serveUI := false
 
 	if ws.config.EnableUI {
 		if _, err := os.Stat(uiPath); err == nil {
 			log.Info().Str("path", uiPath).Msg("Web UI enabled")
 			app.Static("/", uiPath)
+			serveUI = true
 		} else {
 			log.Warn().Str("path", uiPath).Err(err).Msg("Web UI path not found")
 		}
@@ -69,7 +73,24 @@ func (ws *WebServer) SetupApp(logFile *os.File) *fiber.App {
 
 	ws.AddAdminApi(app)
 
+	if serveUI {
+		ws.addUIFallback(app, uiPath)
+	}
+
 	return app
+}
+
+// addUIFallback serves the UI's index.html for client-side routes such as /queues,
+// so reloading or bookmarking a page works. It must be registered after every other
+// route; unknown API paths still get a plain 404 instead of the HTML page.
+func (ws *WebServer) addUIFallback(app *fiber.App, uiPath string) {
+	index := filepath.Join(uiPath, "index.html")
+	app.Get("/*", func(c *fiber.Ctx) error {
+		if strings.HasPrefix(c.Path(), ws.config.ApiPrefix+"/") || c.Path() == ws.config.ApiPrefix {
+			return fiber.ErrNotFound
+		}
+		return c.SendFile(index)
+	})
 }
 
 func (ws *WebServer) AddApi(app *fiber.App) {
