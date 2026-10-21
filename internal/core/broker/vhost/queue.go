@@ -199,6 +199,9 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 	rounds := 0
 
 	for !delivered && rounds < maxRounds {
+		if q.stopping() {
+			return false // the queue was deleted: don't retry by its name
+		}
 		rounds++
 		allThrottled := true
 
@@ -214,8 +217,13 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 			// Found available consumer
 			allThrottled = false
 			if err := vh.deliverToConsumer(consumer, msg, false); err != nil {
+				if q.stopping() {
+					// Deleted while this delivery was in flight. Consumers looked
+					// up by name now may belong to a queue recreated under it.
+					return false
+				}
 				log.Error().Err(err).Str("consumer", consumer.Tag).Msg("Delivery failed, removing consumer")
-				if cancelErr := vh.CancelConsumer(consumer.Channel, consumer.Tag); cancelErr != nil {
+				if cancelErr := vh.removeFailedConsumer(q, consumer); cancelErr != nil {
 					log.Error().Err(cancelErr).Str("consumer", consumer.Tag).Msg("Error cancelling consumer")
 				}
 				// Refresh consumer list and retry
@@ -275,6 +283,24 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 	return true
 }
 
+// stopping reports whether the delivery loop has been told to stop.
+func (q *Queue) stopping() bool {
+	return q.deliveryCtx.Err() != nil
+}
+
+// cancelDeliveryLoop tells the delivery loop to stop and returns without
+// waiting for it. It is safe to call with vh.mu held and from the loop itself.
+func (q *Queue) cancelDeliveryLoop() {
+	q.deliveryMu.Lock()
+	defer q.deliveryMu.Unlock()
+	if q.delivering {
+		q.deliveryCancel()
+	}
+}
+
+// stopDeliveryLoop stops the delivery loop and waits until it has exited.
+// The loop takes vh.mu, so never call this with vh.mu held, and never from
+// the delivery goroutine itself.
 func (q *Queue) stopDeliveryLoop() {
 	q.deliveryMu.Lock()
 	if !q.delivering {
@@ -441,17 +467,15 @@ func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
 		)
 	}
 
-	// Stop delivery loop first, wait for it to complete
-	queue.stopDeliveryLoop()
-
-	// Mark queue as stopped under its own lock before closing the channel.
-	// This prevents any concurrent push from writing to the closed channel.
+	// Stop the delivery loop without waiting for it: vh.mu is held, and the
+	// loop may need vh.mu, be the caller itself, or be blocked writing to a
+	// consumer that stopped reading. A delivery still in flight finishes;
+	// anything it pushes back is discarded because the queue is stopped. The
+	// messages channel is left open for the loop and garbage-collected.
+	queue.cancelDeliveryLoop()
 	queue.mu.Lock()
 	queue.stopped = true
 	queue.mu.Unlock()
-
-	// Now safe to close the messages channel
-	close(queue.messages)
 	// Remove every binding to this queue, whatever the exchange type
 	for _, exchange := range vh.Exchanges {
 		vh.removeQueueBindingsUnlocked(exchange, queue)

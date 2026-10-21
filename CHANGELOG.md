@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deleting a queue no longer hangs the whole vhost. Deletion waited for the queue's delivery
+  loop while holding the vhost lock, so it deadlocked when the loop needed that lock, when the
+  loop was blocked writing to a consumer that had stopped reading, or after a failed delivery
+  had removed the queue's last consumer (the loop then waited for itself, and the queue stopped
+  delivering for good). Deletion now stops the loop without waiting for it (#214).
+
 ## [v0.21.1]
 
 > **Not production-ready.** The notice for v0.21.0 still applies: stop-ship issues remain open (see
