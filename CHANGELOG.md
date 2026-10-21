@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- AMQP field tables, arrays and strings that declare more bytes than the frame carries are now
+  rejected instead of being accepted with the missing bytes zero-padded. An empty string as the
+  last field of a table is no longer rejected (#197, #273 — thanks @tnalbant).
+
 ## [v0.20.0]
 
 > **Not production-ready.** OtterMQ is pre-1.0. Known stop-ship issues (pre-authentication
@@ -44,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `queue.unbind` and `DELETE /api/bindings` on a topic exchange returned success without
   removing the binding.
 - A `Connection.Close` frame with an oversized reply-text length no longer panics the parser
-  (#180, #185).
+  (#180, #185 — thanks @SAY-5).
 - After an unroutable `mandatory` publish, the next publish on the same channel reused the
   previous message's header and body (#187).
 - Declaring an anonymous queue (empty name) hung the client (#188).
