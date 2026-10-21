@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AMQP field tables, arrays and strings that declare more bytes than the frame carries are now
   rejected instead of being accepted with the missing bytes zero-padded. An empty string as the
   last field of a table is no longer rejected (#197, #273 — thanks @tnalbant).
+- A panic while serving one connection (handshake, frame loop or heartbeat) no longer kills the
+  whole broker. The broker logs it with a stack trace, sends `connection.close` 541
+  `INTERNAL_ERROR`, closes only that connection and counts it in the new
+  `ottermq_connection_panics_total` metric. If cleanup after the panic is blocked by a lock the
+  panicking handler left held, the broker exits after 10 s instead of hanging (#194).
 
 ## [v0.20.0]
 

@@ -3,6 +3,9 @@ package amqp
 import (
 	"context"
 	"net"
+	"runtime/debug"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -16,6 +19,8 @@ type AmqpClient struct {
 	Ctx           context.Context
 	Cancel        context.CancelFunc
 	Config        *AmqpClientConfig
+
+	recoveredPanic atomic.Bool
 }
 
 type AmqpClientConfig struct {
@@ -65,6 +70,33 @@ type ConnectionInfo struct {
 	Client            *AmqpClient              `json:"client"`
 	Channels          map[uint16]*ChannelState `json:"channels"`
 	ClosingConnection bool                     `json:"closing_connection"`
+
+	// Shared by copies; nil only for ConnectionInfo literals built in tests.
+	cleanup *cleanupSignal
+}
+
+type cleanupSignal struct {
+	once sync.Once
+	done chan struct{}
+}
+
+// closedChan is returned by CleanedUp when there is no signal to wait on.
+var closedChan = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
+
+// MarkCleanedUp records that the broker finished cleaning up this
+// connection. Safe to call more than once.
+func (ci *ConnectionInfo) MarkCleanedUp() {
+	if ci.cleanup != nil {
+		ci.cleanup.once.Do(func() { close(ci.cleanup.done) })
+	}
+}
+
+// CleanedUp is closed once the broker finished cleaning up this connection.
+func (ci *ConnectionInfo) CleanedUp() <-chan struct{} {
+	if ci.cleanup == nil {
+		return closedChan
+	}
+	return ci.cleanup.done
 }
 
 // NewConnectionInfo creates a new ConnectionInfo, receiving the `vhost` name
@@ -73,6 +105,7 @@ func NewConnectionInfo(vhostName string) *ConnectionInfo {
 		VHostName: vhostName,
 		Client:    nil,
 		Channels:  make(map[uint16]*ChannelState),
+		cleanup:   &cleanupSignal{done: make(chan struct{})},
 	}
 }
 
@@ -81,7 +114,31 @@ func (c *AmqpClient) StartHeartbeat() {
 	go c.monitorHeartbeatTimeout()
 }
 
+// RecoveredPanic reports whether one of the client's heartbeat goroutines
+// panicked and cancelled the connection.
+func (c *AmqpClient) RecoveredPanic() bool {
+	return c.recoveredPanic.Load()
+}
+
+// recoverHeartbeatPanic must be deferred directly by the heartbeat
+// goroutines. A panic there cancels this connection and closes its socket,
+// which unblocks the reader (or a handshake still in progress).
+func (c *AmqpClient) recoverHeartbeatPanic(where string) {
+	if r := recover(); r != nil {
+		log.Error().
+			Str("client", c.RemoteAddr).
+			Str("where", where).
+			Interface("panic", r).
+			Str("stack", string(debug.Stack())).
+			Msg("Recovered panic in heartbeat goroutine, closing connection")
+		c.recoveredPanic.Store(true)
+		c.Cancel()
+		c.Conn.Close()
+	}
+}
+
 func (c *AmqpClient) sendHeartbeats() {
+	defer c.recoverHeartbeatPanic("sendHeartbeats")
 	interval := time.Duration(c.Config.HeartbeatInterval>>1) * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -102,6 +159,7 @@ func (c *AmqpClient) sendHeartbeats() {
 }
 
 func (c *AmqpClient) monitorHeartbeatTimeout() {
+	defer c.recoverHeartbeatPanic("monitorHeartbeatTimeout")
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 

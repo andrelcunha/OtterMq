@@ -257,6 +257,8 @@ func (m *MockCollector) RecordConnection() {}
 
 func (m *MockCollector) RecordConnectionClose() {}
 
+func (m *MockCollector) RecordConnectionPanic() {}
+
 func (m *MockCollector) RecordChannelOpen(connName, vhost, user string, channelNumber uint16) {}
 
 func (m *MockCollector) RecordChannelClose(connName string, channelNumber uint16) {}

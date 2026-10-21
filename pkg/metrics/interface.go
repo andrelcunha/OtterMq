@@ -39,6 +39,7 @@ type MetricsCollector interface {
 	// Broker-level metrics
 	RecordConnection()
 	RecordConnectionClose()
+	RecordConnectionPanic()
 	RecordChannelOpen(connName, vhost, user string, channelNumber uint16)
 	RecordChannelClose(connName string, channelNumber uint16)
 	GetBrokerMetrics() *BrokerMetrics

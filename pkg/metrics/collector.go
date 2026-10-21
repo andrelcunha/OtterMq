@@ -41,6 +41,7 @@ type Collector struct {
 	totalDeliverManualAckCount atomic.Int64
 	totalAckCount              atomic.Int64
 	totalNackCount             atomic.Int64
+	connectionPanicCount       atomic.Int64
 
 	config *Config
 
@@ -598,6 +599,15 @@ func (c *Collector) RecordConnectionClose() {
 	c.connectionCount.Add(-1)
 }
 
+// RecordConnectionPanic records a panic recovered in a goroutine serving a connection
+func (c *Collector) RecordConnectionPanic() {
+	if !c.config.Enabled {
+		return
+	}
+
+	c.connectionPanicCount.Add(1)
+}
+
 // RecordChannelOpen records a new channel opening
 func (c *Collector) RecordChannelOpen(connName, vhost, user string, channelNumber uint16) {
 	if !c.config.Enabled {
@@ -645,6 +655,7 @@ func (c *Collector) GetBrokerMetrics() *BrokerMetrics {
 		deliveredManualAckTotal: c.totalDeliverManualAckCount.Load(),
 		ackedTotal:              c.totalAckCount.Load(),
 		nackedTotal:             c.totalNackCount.Load(),
+		connectionPanicsTotal:   c.connectionPanicCount.Load(),
 	}
 }
 
@@ -745,6 +756,7 @@ type BrokerMetrics struct {
 	deliveredManualAckTotal int64
 	ackedTotal              int64
 	nackedTotal             int64
+	connectionPanicsTotal   int64
 }
 
 // Getters for BrokerMetrics
@@ -798,6 +810,7 @@ type BrokerSnapshot struct {
 	DeliveredTotal             int64 // Sum of AutoAck + ManualAck
 	AckedTotal                 int64
 	NackedTotal                int64
+	ConnectionPanicsTotal      int64
 }
 
 // GetBrokerSnapshot returns a snapshot of current broker metrics
@@ -832,6 +845,7 @@ func (bm *BrokerMetrics) Snapshot() *BrokerSnapshot {
 		DeliveredTotal:             bm.deliveredAutoAckTotal + bm.deliveredManualAckTotal,
 		AckedTotal:                 bm.ackedTotal,
 		NackedTotal:                bm.nackedTotal,
+		ConnectionPanicsTotal:      bm.connectionPanicsTotal,
 	}
 }
 
@@ -1015,6 +1029,7 @@ func (c *Collector) Clear() {
 	c.channelCount.Store(0)
 	c.queueCount.Store(0)
 	c.exchangeCount.Store(0)
+	c.connectionPanicCount.Store(0)
 }
 
 // IsEnabled returns whether metrics collection is enabled
