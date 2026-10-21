@@ -68,12 +68,16 @@ npm run format       # apply prettier
 
 ## Commits and pull requests
 
-- **Branch from `main`.** Use a short descriptive branch name, e.g. `fix/182-decode-table-error`.
+- **Branch from `dev` and open your pull request against `dev`**, the default branch. `main` only changes when a release is made (see [Releases](#releases)). Use a short descriptive branch name, e.g. `fix/182-decode-table-error`.
 - **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`, for example `fix(amqp): reject truncated field values`. Common types are `fix`, `feat`, `refactor`, `test`, `docs`, `build` and `ci`. Common scopes are `amqp`, `broker`, `api`, `ui`, `cli`, `docker` and `ci`.
 - **One topic per pull request.** Mention the issue it closes (`Closes #182`) so GitHub links and closes it.
 - **In the PR description,** explain what was wrong, how you fixed it, and how you tested it. A short "before and after" (a failing test, then a passing one) makes review fast.
-- If the change is visible to users, add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). If you're unsure how to word it, we'll help.
+- If the change is visible to users, add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). If you're unsure how to word it, or forget, a maintainer adds it when the PR is merged: every merged change ends up under `[Unreleased]`.
 - **CI** builds and tests every pull request, and also builds the Docker image. For first-time contributors, GitHub waits for a maintainer to approve the workflow run, so don't worry if checks don't start right away.
+
+### Releases
+
+All work is merged into `dev`. When `dev` is ready for a release, a maintainer opens a pull request from `dev` to `main` that turns the `[Unreleased]` section of the CHANGELOG into the new version's section. It is merged with a merge commit (not squashed or rebased, so `dev` and `main` keep the same history), and the merge commit on `main` is tagged `vX.Y.Z`. The tag publishes the versioned Docker images. `main` therefore always matches the latest release.
 
 ### Using AI assistants
 
