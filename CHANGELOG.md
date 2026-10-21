@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A broker restarted on a data dir that holds persistent messages no longer panics while
   recovering the vhost; the messages are back in their durable queues and can be consumed (#233).
+- Concurrent persistence writes to one queue or exchange (for example a publish and an ack on
+  the same durable queue, or two binds to one exchange) no longer interleave and corrupt its JSON
+  file or lose updates. The JSON store now locks each file across every load-modify-save, and the
+  `Persistence` interface documents that implementations must be safe for concurrent use (#236).
 - AMQP field tables, arrays and strings that declare more bytes than the frame carries are now
   rejected instead of being accepted with the missing bytes zero-padded. An empty string as the
   last field of a table is no longer rejected (#197, #273 — thanks @tnalbant).

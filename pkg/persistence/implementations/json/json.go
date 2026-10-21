@@ -3,16 +3,29 @@ package json
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/ottermq/ottermq/pkg/persistence"
 )
 
+// fileLockStripes is the number of locks entity files are spread over.
+const fileLockStripes = 256
+
+// JsonPersistence keeps one JSON file per queue and per exchange. It is safe
+// for concurrent use: every read, write and load-modify-save of a file holds
+// that file's lock, so concurrent updates to one entity (publish and ack on a
+// queue, two binds on an exchange) are serialised instead of interleaved.
 type JsonPersistence struct {
 	dataDir string
+	// fileLocks is a striped lock keyed by file path. Unrelated files may
+	// share a stripe, which only serialises them. No method holds more than
+	// one stripe at a time.
+	fileLocks [fileLockStripes]sync.Mutex
 }
 
 func NewJsonPersistence(config *persistence.Config) (*JsonPersistence, error) {
@@ -55,6 +68,23 @@ func safeVHostName(name string) string {
 	return url.PathEscape(name)
 }
 
+// lockFile locks the stripe that guards path and returns its unlock function.
+func (jp *JsonPersistence) lockFile(path string) func() {
+	h := fnv.New32a()
+	h.Write([]byte(path))
+	mu := &jp.fileLocks[h.Sum32()%fileLockStripes]
+	mu.Lock()
+	return mu.Unlock
+}
+
+func (jp *JsonPersistence) exchangeFile(vhost, name string) string {
+	return filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "exchanges", name+".json")
+}
+
+func (jp *JsonPersistence) queueFile(vhost, name string) string {
+	return filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "queues", name+".json")
+}
+
 // SaveExchangeMetadata persists exchange metadata to a JSON file
 func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string, props persistence.ExchangeProperties) error {
 	safeName := safeVHostName(vhost)
@@ -69,6 +99,7 @@ func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string
 		Properties: props,
 	}
 	file := filepath.Join(dir, name+".json")
+	defer jp.lockFile(file)()
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
 		return err
@@ -78,17 +109,11 @@ func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string
 
 // LoadExchangeMetadata loads exchange metadata from a JSON file (type and properties)
 func (jp *JsonPersistence) LoadExchangeMetadata(vhost, name string) (exchangeType string, props persistence.ExchangeProperties, err error) {
-	safeName := safeVHostName(vhost)
-	file := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges", name+".json")
+	file := jp.exchangeFile(vhost, name)
+	defer jp.lockFile(file)()
 
-	data, err := os.ReadFile(file)
+	exchangeData, err := loadExchangeFile(file)
 	if err != nil {
-		return "", persistence.ExchangeProperties{}, err
-	}
-
-	var exchangeData JsonExchangeData
-
-	if err := json.Unmarshal(data, &exchangeData); err != nil {
 		return "", persistence.ExchangeProperties{}, err
 	}
 	return exchangeData.Type, exchangeData.Properties, nil
@@ -96,8 +121,8 @@ func (jp *JsonPersistence) LoadExchangeMetadata(vhost, name string) (exchangeTyp
 
 // DeleteExchange removes a single exchange JSON file
 func (jp *JsonPersistence) DeleteExchangeMetadata(vhost, name string) error {
-	safeName := safeVHostName(vhost)
-	file := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges", name+".json")
+	file := jp.exchangeFile(vhost, name)
+	defer jp.lockFile(file)()
 	if err := os.Remove(file); err != nil {
 		return err
 	}
@@ -119,8 +144,11 @@ func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persisten
 		Messages:   []JsonMessageData{}, // Preserve existing messages
 	}
 
+	file := filepath.Join(dir, name+".json")
+	defer jp.lockFile(file)()
+
 	// For JSON implementation, we need to preserve existing messages if they exist
-	existingQueue, err := jp.loadQueueFile(vhost, name)
+	existingQueue, err := loadQueueFile(file)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -129,7 +157,6 @@ func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persisten
 		queueData.Messages = existingQueue.Messages
 	}
 
-	file := filepath.Join(dir, name+".json")
 	data, err := json.MarshalIndent(queueData, "", "  ")
 	if err != nil {
 		return err
@@ -139,7 +166,9 @@ func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persisten
 
 // LoadQueueMetadata loads a single queue's metadata from a JSON file (props)
 func (jp *JsonPersistence) LoadQueueMetadata(vhost, name string) (props persistence.QueueProperties, err error) {
-	queueData, err := jp.loadQueueFile(vhost, name)
+	file := jp.queueFile(vhost, name)
+	defer jp.lockFile(file)()
+	queueData, err := loadQueueFile(file)
 	if err != nil {
 		return persistence.QueueProperties{}, err
 	}
@@ -149,20 +178,17 @@ func (jp *JsonPersistence) LoadQueueMetadata(vhost, name string) (props persiste
 func (jp *JsonPersistence) SaveBindingState(vhost, exchange, queue, routingKey string, arguments map[string]any) error {
 	// For JSON persistence, bindings are part of exchange metadata
 	// So we can just load the exchange, update bindings, and save it back
-	exchangeType, props, err := jp.LoadExchangeMetadata(vhost, exchange)
+	file := jp.exchangeFile(vhost, exchange)
+	defer jp.lockFile(file)()
+	existing, err := loadExchangeFile(file)
 	if err != nil {
 		return fmt.Errorf("failed to load exchange for binding: %v", err)
 	}
-
-	existingBindings, err := jp.LoadExchangeBindings(vhost, exchange)
-	if err != nil {
-		return fmt.Errorf("failed to load existing bindings: %v", err)
-	}
 	exchangeData := JsonExchangeData{
 		Name:       exchange,
-		Type:       exchangeType,
-		Properties: props,
-		Bindings:   existingBindings,
+		Type:       existing.Type,
+		Properties: existing.Properties,
+		Bindings:   existing.Bindings,
 	}
 
 	bindingMetadata := persistence.BindingData{
@@ -185,11 +211,9 @@ func (jp *JsonPersistence) SaveBindingState(vhost, exchange, queue, routingKey s
 	}
 
 	// Ensure directory exists before writing
-	dir := filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "exchanges")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
-	file := filepath.Join(dir, exchange+".json")
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
 		return err
@@ -198,17 +222,11 @@ func (jp *JsonPersistence) SaveBindingState(vhost, exchange, queue, routingKey s
 }
 
 func (jp *JsonPersistence) LoadExchangeBindings(vhost string, exchange string) ([]persistence.BindingData, error) {
-	safeName := safeVHostName(vhost)
-	file := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges", exchange+".json")
+	file := jp.exchangeFile(vhost, exchange)
+	defer jp.lockFile(file)()
 
-	data, err := os.ReadFile(file)
+	exchangeData, err := loadExchangeFile(file)
 	if err != nil {
-		return nil, err
-	}
-
-	var exchangeData JsonExchangeData
-
-	if err := json.Unmarshal(data, &exchangeData); err != nil {
 		return nil, err
 	}
 	return exchangeData.Bindings, nil
@@ -216,18 +234,15 @@ func (jp *JsonPersistence) LoadExchangeBindings(vhost string, exchange string) (
 
 // DeleteBindingState deletes a binding between an exchange and a queue
 func (jp *JsonPersistence) DeleteBindingState(vhost, exchange, queue, routingKey string, arguments map[string]any) error {
-	exchangeType, props, err := jp.LoadExchangeMetadata(vhost, exchange)
+	file := jp.exchangeFile(vhost, exchange)
+	defer jp.lockFile(file)()
+	existing, err := loadExchangeFile(file)
 	if err != nil {
 		return fmt.Errorf("failed to load exchange for binding: %v", err)
 	}
-
-	existingBindings, err := jp.LoadExchangeBindings(vhost, exchange)
-	if err != nil {
-		return fmt.Errorf("failed to load existing bindings: %v", err)
-	}
 	// Filter out the binding to be deleted
 	var updatedBindings []persistence.BindingData
-	for _, b := range existingBindings {
+	for _, b := range existing.Bindings {
 		if !(b.QueueName == queue && b.RoutingKey == routingKey && equalArgs(b.Arguments, arguments)) {
 			updatedBindings = append(updatedBindings, b)
 		}
@@ -235,17 +250,15 @@ func (jp *JsonPersistence) DeleteBindingState(vhost, exchange, queue, routingKey
 	// remove the binding from the exchange data
 	exchangeData := JsonExchangeData{
 		Name:       exchange,
-		Type:       exchangeType,
-		Properties: props,
+		Type:       existing.Type,
+		Properties: existing.Properties,
 		Bindings:   updatedBindings,
 	}
 
 	// Ensure directory exists before writing (in case metadata was never saved)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "exchanges")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
-	file := filepath.Join(dir, exchange+".json")
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
 		return err
@@ -254,7 +267,9 @@ func (jp *JsonPersistence) DeleteBindingState(vhost, exchange, queue, routingKey
 }
 
 func (jp *JsonPersistence) SaveMessage(vhost, queue, msgId string, msgBody []byte, msgProps persistence.MessageProperties) error {
-	qData, err := jp.loadQueueFile(vhost, queue)
+	file := jp.queueFile(vhost, queue)
+	defer jp.lockFile(file)()
+	qData, err := loadQueueFile(file)
 	if err != nil {
 		return fmt.Errorf("queue not found: %v", err)
 	}
@@ -268,11 +283,13 @@ func (jp *JsonPersistence) SaveMessage(vhost, queue, msgId string, msgBody []byt
 	qData.Messages = append(qData.Messages, newMessage)
 
 	// Save the complete queue data including messages
-	return jp.saveQueueFile(vhost, queue, qData)
+	return saveQueueFile(file, qData)
 }
 
 func (jp *JsonPersistence) LoadMessages(vhostName, queueName string) ([]persistence.Message, error) {
-	qData, err := jp.loadQueueFile(vhostName, queueName)
+	file := jp.queueFile(vhostName, queueName)
+	defer jp.lockFile(file)()
+	qData, err := loadQueueFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("queue not found: %v", err)
 	}
@@ -289,7 +306,9 @@ func (jp *JsonPersistence) LoadMessages(vhostName, queueName string) ([]persiste
 }
 
 func (jp *JsonPersistence) DeleteMessage(vhost, queue, msgId string) error {
-	qData, err := jp.loadQueueFile(vhost, queue)
+	file := jp.queueFile(vhost, queue)
+	defer jp.lockFile(file)()
+	qData, err := loadQueueFile(file)
 	if err != nil {
 		return fmt.Errorf("queue not found: %v", err)
 	}
@@ -308,7 +327,7 @@ func (jp *JsonPersistence) DeleteMessage(vhost, queue, msgId string) error {
 	}
 	qData.Messages = filtered
 
-	return jp.saveQueueFile(vhost, queue, qData)
+	return saveQueueFile(file, qData)
 }
 
 func (jp *JsonPersistence) LoadAllExchanges(vhost string) ([]persistence.ExchangeSnapshot, error) {
@@ -329,17 +348,16 @@ func (jp *JsonPersistence) LoadAllExchanges(vhost string) ([]persistence.Exchang
 			continue
 		}
 		name := strings.TrimSuffix(entry.Name(), ".json")
-		exchangeType, props, err := jp.LoadExchangeMetadata(vhost, name)
+		exchangeData, err := jp.lockedLoadExchangeFile(jp.exchangeFile(vhost, name))
 		if err != nil {
 			continue // Skip corrupt files
 		}
-		bindings, _ := jp.LoadExchangeBindings(vhost, name)
 
 		snapshots = append(snapshots, persistence.ExchangeSnapshot{
 			Name:       name,
-			Type:       exchangeType,
-			Properties: props,
-			Bindings:   bindings,
+			Type:       exchangeData.Type,
+			Properties: exchangeData.Properties,
+			Bindings:   exchangeData.Bindings,
 		})
 	}
 	return snapshots, nil
@@ -363,7 +381,7 @@ func (jp *JsonPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnaps
 			continue
 		}
 		name := strings.TrimSuffix(entry.Name(), ".json")
-		queueData, err := jp.loadQueueFile(vhost, name)
+		queueData, err := jp.lockedLoadQueueFile(jp.queueFile(vhost, name))
 		if err != nil {
 			continue // Skip corrupt files
 		}
@@ -425,11 +443,10 @@ func (jp *JsonPersistence) LoadAllVHosts() ([]string, error) {
 
 /* ---- Private methods ---- */
 
-// LoadQueue loads a single queue from a JSON file
-func (jp *JsonPersistence) loadQueueFile(vhost, name string) (*JsonQueueData, error) {
-	safeName := safeVHostName(vhost)
-	file := filepath.Join(jp.dataDir, "vhosts", safeName, "queues", name+".json")
+// The helpers below don't lock; callers hold the file's lock.
 
+// loadQueueFile loads a single queue from a JSON file
+func loadQueueFile(file string) (*JsonQueueData, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
@@ -441,14 +458,34 @@ func (jp *JsonPersistence) loadQueueFile(vhost, name string) (*JsonQueueData, er
 	return &queueData, nil
 }
 
-func (jp *JsonPersistence) saveQueueFile(vhost, queueName string, queueData *JsonQueueData) error {
-	safeName := safeVHostName(vhost)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "queues")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+func (jp *JsonPersistence) lockedLoadQueueFile(file string) (*JsonQueueData, error) {
+	defer jp.lockFile(file)()
+	return loadQueueFile(file)
+}
+
+// loadExchangeFile loads a single exchange, with its bindings, from a JSON file
+func loadExchangeFile(file string) (*JsonExchangeData, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	var exchangeData JsonExchangeData
+	if err := json.Unmarshal(data, &exchangeData); err != nil {
+		return nil, err
+	}
+	return &exchangeData, nil
+}
+
+func (jp *JsonPersistence) lockedLoadExchangeFile(file string) (*JsonExchangeData, error) {
+	defer jp.lockFile(file)()
+	return loadExchangeFile(file)
+}
+
+func saveQueueFile(file string, queueData *JsonQueueData) error {
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
 
-	file := filepath.Join(dir, queueName+".json")
 	data, err := json.MarshalIndent(queueData, "", "  ")
 	if err != nil {
 		return err
@@ -458,8 +495,8 @@ func (jp *JsonPersistence) saveQueueFile(vhost, queueName string, queueData *Jso
 
 // DeleteQueue removes a single queue JSON file
 func (jp *JsonPersistence) DeleteQueueMetadata(vhostName, queueName string) error {
-	safeName := safeVHostName(vhostName)
-	file := filepath.Join(jp.dataDir, "vhosts", safeName, "queues", queueName+".json")
+	file := jp.queueFile(vhostName, queueName)
+	defer jp.lockFile(file)()
 	if err := os.Remove(file); err != nil {
 		return err
 	}

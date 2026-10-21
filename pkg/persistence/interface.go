@@ -1,6 +1,15 @@
 package persistence
 
-// Persistence defines the interface for all storage backends
+// Persistence defines the interface for all storage backends.
+//
+// Concurrency: implementations must be safe for concurrent use by multiple
+// goroutines. The broker calls them without holding a common lock; for
+// example, a publish calls SaveMessage while an ack on another channel calls
+// DeleteMessage on the same queue. Each method must be atomic with respect to
+// every other method that touches the same entity (a queue with its
+// messages, or an exchange with its bindings): concurrent calls must not lose
+// each other's updates, and a load must never observe a partially written
+// entity. The order in which concurrent calls take effect is unspecified.
 type Persistence interface {
 	/* Queue operations */
 
