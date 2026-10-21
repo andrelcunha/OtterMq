@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deleting a queue now removes its bindings from every exchange, not just direct and fanout
+  ones. Before, topic bindings (including `amq.topic`) stayed behind and pointed at the deleted
+  queue: matching publishes were silently dropped instead of being unroutable, and a persistent
+  publish matching a deleted durable queue's pattern closed the publisher's connection with 541.
+  Every binding to the queue is removed, its persisted binding state is deleted, and auto-delete
+  exchanges left without bindings are deleted (#230).
+- A message being delivered when its consumer was cancelled is no longer delivered twice. The
+  delivery loop used to push the message back onto the queue when it stopped, even though the
+  cancel had already requeued it as unacked.
 - A broker restarted on a data dir that holds persistent messages no longer panics while
   recovering the vhost; the messages are back in their durable queues and can be consumed (#233).
 - Concurrent persistence writes to one queue or exchange (for example a publish and an ack on
