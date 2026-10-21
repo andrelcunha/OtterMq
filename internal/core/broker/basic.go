@@ -474,6 +474,9 @@ func (b *Broker) basicAckHandler(newState *amqp.ChannelState, conn net.Conn, vh 
 	}
 	err = vh.HandleBasicAck(connID, channel, deliveryTag, multiple)
 	if err != nil {
+		if _, isChannelError := err.(*errors.ChannelError); isChannelError {
+			return sendChannelErrorResponse(err, b, conn, request)
+		}
 		log.Error().Err(err).Msg("Failed to acknowledge message")
 		return nil, err
 	}
@@ -503,6 +506,9 @@ func (b *Broker) basicRejectHandler(newState *amqp.ChannelState, conn net.Conn, 
 	}
 	err = vh.HandleBasicReject(connID, request.Channel, deliveryTag, requeue)
 	if err != nil {
+		if _, isChannelError := err.(*errors.ChannelError); isChannelError {
+			return sendChannelErrorResponse(err, b, conn, request)
+		}
 		log.Error().Err(err).Msg("Failed to reject message")
 		return nil, err
 	}
@@ -579,6 +585,9 @@ func (b *Broker) basicNackHandler(newState *amqp.ChannelState, conn net.Conn, vh
 	}
 	err = vh.HandleBasicNack(connID, channel, deliveryTag, multiple, requeue)
 	if err != nil {
+		if _, isChannelError := err.(*errors.ChannelError); isChannelError {
+			return sendChannelErrorResponse(err, b, conn, request)
+		}
 		log.Error().Err(err).Msg("Failed to reject message")
 		return nil, err
 	}

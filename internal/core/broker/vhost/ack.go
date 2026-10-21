@@ -3,11 +3,25 @@ package vhost
 import (
 	"fmt"
 
+	"github.com/ottermq/ottermq/internal/core/amqp"
+	"github.com/ottermq/ottermq/internal/core/amqp/errors"
 	"github.com/rs/zerolog/log"
 )
 
+// unknownDeliveryTagError reports a delivery tag the channel has no outstanding
+// delivery for, as required by basic.ack/nack/reject: the server must raise a
+// channel exception. Clients rely on this to catch double-acks.
+func unknownDeliveryTagError(deliveryTag uint64, methodID uint16) error {
+	return errors.NewChannelError(
+		fmt.Sprintf("PRECONDITION_FAILED - unknown delivery tag %d", deliveryTag),
+		uint16(amqp.PRECONDITION_FAILED),
+		uint16(amqp.BASIC),
+		methodID,
+	)
+}
+
 func (vh *VHost) HandleBasicAck(connID ConnectionID, channel uint16, deliveryTag uint64, multiple bool) error {
-	toDelete, err := vh.popUnackedRecords(connID, channel, deliveryTag, multiple)
+	toDelete, err := vh.popUnackedRecords(connID, channel, deliveryTag, multiple, uint16(amqp.BASIC_ACK))
 	if err != nil {
 		return err
 	}
@@ -28,24 +42,38 @@ func (vh *VHost) HandleBasicAck(connID ConnectionID, channel uint16, deliveryTag
 	return nil
 }
 
-func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, deliveryTag uint64, multiple bool) ([]*DeliveryRecord, error) {
+func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, deliveryTag uint64, multiple bool, methodID uint16) ([]*DeliveryRecord, error) {
 	key := ConnectionChannelKey{connID, channel}
 
 	vh.mu.Lock()
 	ch := vh.ChannelDeliveries[key]
 	vh.mu.Unlock()
 	if ch == nil {
-		return nil, fmt.Errorf("no channel delivery state for channel %d", channel)
+		// multiple=true with tag 0 means "ack everything outstanding"; on a
+		// channel that never had a delivery there is nothing to do.
+		if multiple && deliveryTag == 0 {
+			return nil, nil
+		}
+		return nil, unknownDeliveryTagError(deliveryTag, methodID)
 	}
 
 	removed := make([]*DeliveryRecord, 0)
 
 	ch.mu.Lock()
 	if multiple {
-		// Multiple=true: must scan flat map for numeric ordering
+		// multiple=true with delivery-tag 0 means "all outstanding messages".
+		// Any other tag must itself be outstanding, otherwise the client is
+		// acknowledging a delivery it never received (or already acked).
+		if deliveryTag != 0 {
+			if _, exists := ch.UnackedByTag[deliveryTag]; !exists {
+				ch.mu.Unlock()
+				return nil, unknownDeliveryTagError(deliveryTag, methodID)
+			}
+		}
+		// Must scan the flat map for numeric ordering.
 		for tag, record := range ch.UnackedByTag {
 			log.Debug().Uint64("tag", tag).Msg("Checking unacked tag for multiple ack")
-			if tag <= deliveryTag {
+			if deliveryTag == 0 || tag <= deliveryTag {
 				removed = append(removed, record)
 				deleteUnackedDelivery(ch, tag, record.ConsumerTag)
 				log.Debug().Uint64("tag", tag).Msg("Removed unacked tag for multiple ack")
@@ -53,11 +81,14 @@ func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, delivery
 		}
 	} else {
 		// Single ack: O(1) lookup in flat map
-		if record, exists := ch.UnackedByTag[deliveryTag]; exists {
-			removed = append(removed, record)
-			deleteUnackedDelivery(ch, deliveryTag, record.ConsumerTag)
-			log.Debug().Uint64("tag", deliveryTag).Msg("Removed unacked tag for single ack")
+		record, exists := ch.UnackedByTag[deliveryTag]
+		if !exists {
+			ch.mu.Unlock()
+			return nil, unknownDeliveryTagError(deliveryTag, methodID)
 		}
+		removed = append(removed, record)
+		deleteUnackedDelivery(ch, deliveryTag, record.ConsumerTag)
+		log.Debug().Uint64("tag", deliveryTag).Msg("Removed unacked tag for single ack")
 	}
 	// Notify any waiters that unacked state has changed
 	select {
@@ -82,11 +113,15 @@ func deleteUnackedDelivery(ch *ChannelDeliveryState, tag uint64, consumerTag str
 }
 
 func (vh *VHost) HandleBasicReject(connID ConnectionID, channel uint16, deliveryTag uint64, requeue bool) error {
-	return vh.HandleBasicNack(connID, channel, deliveryTag, false, requeue)
+	return vh.handleBasicNack(connID, channel, deliveryTag, false, requeue, uint16(amqp.BASIC_REJECT))
 }
 
 func (vh *VHost) HandleBasicNack(connID ConnectionID, channel uint16, deliveryTag uint64, multiple, requeue bool) error {
-	recordsToNack, err := vh.popUnackedRecords(connID, channel, deliveryTag, multiple)
+	return vh.handleBasicNack(connID, channel, deliveryTag, multiple, requeue, uint16(amqp.BASIC_NACK))
+}
+
+func (vh *VHost) handleBasicNack(connID ConnectionID, channel uint16, deliveryTag uint64, multiple, requeue bool, methodID uint16) error {
+	recordsToNack, err := vh.popUnackedRecords(connID, channel, deliveryTag, multiple, methodID)
 	if err != nil {
 		return err
 	}
