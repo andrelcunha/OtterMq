@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An `edge` Docker image (`ghcr.io/ottermq/ottermq:edge`) is published from the `dev` branch,
+  where pull requests are now merged. `latest` is published from `main`, which now changes only
+  when a release is made, so `latest` is always the latest release.
+
 ### Fixed
 
 - Deleting a queue now removes its bindings from every exchange, not just direct and fanout
@@ -585,7 +591,8 @@ For releases prior to v0.7.1, please refer to [GitHub Releases](https://github.c
 
 ---
 
-[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.19.3...HEAD
+[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.20.0...HEAD
+[v0.20.0]: https://github.com/ottermq/ottermq/releases/tag/v0.20.0
 [v0.19.3]: https://github.com/ottermq/ottermq/releases/tag/v0.19.3
 [v0.19.2]: https://github.com/ottermq/ottermq/releases/tag/v0.19.2
 [v0.19.1]: https://github.com/ottermq/ottermq/releases/tag/v0.19.1

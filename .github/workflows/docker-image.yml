@@ -2,10 +2,10 @@ name: Docker Image CI
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]          # v0.20.0 -> ghcr.io/ottermq/ottermq:0.20.0 and :0.20
+    branches: [ "dev", "main" ]  # dev -> :edge, main -> :latest
+    tags: [ "v*" ]               # v0.20.0 -> ghcr.io/ottermq/ottermq:0.20.0 and :0.20
   pull_request:
-    branches: [ "main" ]    # build only, never pushed
+    branches: [ "dev", "main" ]  # build only, never pushed
 
 permissions:
   contents: read
@@ -47,7 +47,9 @@ jobs:
         tags: |
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
-          type=raw,value=latest,enable={{is_default_branch}}
+          # dev is the default branch, so latest is tied to main by name
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          type=raw,value=edge,enable=${{ github.ref == 'refs/heads/dev' }}
           type=sha,format=short
 
     - name: Build and push
