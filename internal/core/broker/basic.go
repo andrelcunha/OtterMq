@@ -110,7 +110,7 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 		log.Error().Err(err).Msg("Failed to send header frame")
 	}
 	// Body
-	frame = responseContent.FormatBodyFrame()
+	frame = responseContent.FormatBodyFrame(b.negotiatedFrameMax(conn))
 	if err := b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send body frame")
 	}
@@ -413,6 +413,7 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 		Exclusive: exclusive,
 		Arguments: arguments,
 	})
+	consumer.FrameMax = b.negotiatedFrameMax(conn)
 
 	consumerTag, err := vh.RegisterConsumer(consumer)
 	if err != nil {
@@ -554,7 +555,7 @@ func (b *Broker) BasicReturn(conn net.Conn, channel uint16, exchange, routingKey
 			routingKey,
 		), append(
 			b.framer.CreateHeaderFrame(channel, uint16(amqp.BASIC), *msg),
-			b.framer.CreateBodyFrame(channel, msg.Body)...)...)
+			b.framer.CreateBodyFrame(channel, b.negotiatedFrameMax(conn), msg.Body)...)...)
 
 	if err := b.framer.SendFrame(conn, frames); err != nil {
 		log.Error().Err(err).Msg("Failed to send basic return frame")

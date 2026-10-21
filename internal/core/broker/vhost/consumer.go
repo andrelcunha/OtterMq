@@ -40,6 +40,7 @@ type Consumer struct {
 	ConnectionID  ConnectionID
 	Active        atomic.Bool
 	PrefetchCount uint16 // 0 means unlimited
+	FrameMax      uint32 // negotiated frame-max of the consumer's connection; 0 means unlimited
 	Props         *ConsumerProperties
 
 	frameSender FrameSender

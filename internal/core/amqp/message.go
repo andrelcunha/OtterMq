@@ -94,20 +94,32 @@ func createHeaderFrame(channel, classID uint16, msg Message) []byte {
 	return frame
 }
 
-func (rc ResponseContent) FormatBodyFrame() []byte {
-	return createBodyFrame(rc.Channel, rc.Message.Body)
+func (rc ResponseContent) FormatBodyFrame(frameMax uint32) []byte {
+	return createBodyFrame(rc.Channel, frameMax, rc.Message.Body)
 }
 
-func createBodyFrame(channel uint16, content []byte) []byte {
+// createBodyFrame returns content as consecutive body frames, each at most
+// frameMax octets long (header and frame-end included). frameMax 0 means no
+// limit. An empty body still yields one empty body frame.
+func createBodyFrame(channel uint16, frameMax uint32, content []byte) []byte {
 	frameType := uint8(TYPE_BODY)
-	var payloadBuf bytes.Buffer
-	payloadBuf.Write(content)
+	chunkSize := len(content)
+	if frameMax > FRAME_OVERHEAD && uint64(frameMax-FRAME_OVERHEAD) < uint64(chunkSize) {
+		chunkSize = int(frameMax - FRAME_OVERHEAD)
+	}
+	if chunkSize == 0 {
+		return append(formatHeader(frameType, channel, 0), FRAME_END)
+	}
 
-	payloadSize := uint32(payloadBuf.Len())
-	headerBuf := formatHeader(frameType, channel, payloadSize)
-	frame := append(headerBuf, payloadBuf.Bytes()...)
-	frame = append(frame, FRAME_END)
-	return frame
+	frames := (len(content) + chunkSize - 1) / chunkSize
+	out := make([]byte, 0, len(content)+frames*FRAME_OVERHEAD)
+	for start := 0; start < len(content); start += chunkSize {
+		chunk := content[start:min(start+chunkSize, len(content))]
+		out = append(out, formatHeader(frameType, channel, uint32(len(chunk)))...)
+		out = append(out, chunk...)
+		out = append(out, FRAME_END)
+	}
+	return out
 }
 
 func (msg ResponseMethodMessage) FormatMethodFrame() []byte {

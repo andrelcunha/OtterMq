@@ -32,6 +32,23 @@ func (b *Broker) channelHandler(request *amqp.RequestMethodMessage, vh *vhost.VH
 func (b *Broker) handleOpenChannel(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
 	log.Debug().Interface("request", request).Msg("Received channel open request")
 
+	// Channel 0 is the connection's; ids above the negotiated channel-max are
+	// refused like RabbitMQ does ("channel_max exceeded").
+	channelMax := b.negotiatedChannelMax(conn)
+	if request.Channel == 0 || request.Channel > channelMax {
+		amqpErr := errors.NewConnectionError(
+			fmt.Sprintf("channel %d not allowed (channel_max=%d)", request.Channel, channelMax),
+			uint16(amqp.NOT_ALLOWED),
+			uint16(amqp.CHANNEL),
+			uint16(amqp.CHANNEL_OPEN),
+		)
+		if _, err := b.sendConnectionClosing(conn, 0, amqpErr.ReplyCode(), amqpErr.ClassID(), amqpErr.MethodID(), amqpErr.Error()); err != nil {
+			log.Error().Err(err).Msg("Failed to send connection.close")
+		}
+		b.setConnectionClosingState(conn)
+		return nil, nil
+	}
+
 	// Check if the channel is already open
 	if b.checkChannel(conn, request.Channel) {
 		log.Debug().Uint16("channel", request.Channel).Msg("Channel already open")

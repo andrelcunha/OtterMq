@@ -18,6 +18,9 @@ type AmqpClient struct {
 	Ctx         context.Context
 	Cancel      context.CancelFunc
 	Config      *AmqpClientConfig
+	// Negotiated is set by the handshake before the client is shared with
+	// other goroutines, and read-only afterwards.
+	Negotiated Negotiated
 
 	// UnixNano of the last inbound frame. Written by the reader goroutine,
 	// read by the heartbeat monitor and the management API.
@@ -27,12 +30,9 @@ type AmqpClient struct {
 }
 
 type AmqpClientConfig struct {
-	Username          string
-	HeartbeatInterval uint16
-	FrameMax          uint32
-	ChannelMax        uint16
-	Protocol          string
-	SSL               bool
+	Username string
+	Protocol string
+	SSL      bool
 }
 
 func NewAmqpClient(conn net.Conn, config *AmqpClientConfig, connCtx context.Context, cancel context.CancelFunc) *AmqpClient {
@@ -49,24 +49,6 @@ func NewAmqpClient(conn net.Conn, config *AmqpClientConfig, connCtx context.Cont
 	client.TouchHeartbeat()
 
 	return client
-}
-
-func NewAmqpClientConfig(configurations *map[string]any) *AmqpClientConfig {
-	username := (*configurations)["username"].(string)
-	heartbeatInterval := (*configurations)["heartbeatInterval"].(uint16)
-	frameMax := (*configurations)["frameMax"].(uint32)
-	channelMax := (*configurations)["channelMax"].(uint16)
-	protocol := (*configurations)["protocol"].(string)
-	ssl := (*configurations)["ssl"].(bool)
-
-	return &AmqpClientConfig{
-		Username:          username,
-		HeartbeatInterval: heartbeatInterval,
-		FrameMax:          frameMax,
-		ChannelMax:        channelMax,
-		Protocol:          protocol,
-		SSL:               ssl,
-	}
 }
 
 // ConnectionInfo represents the information of a connection to the AMQP server
@@ -128,7 +110,7 @@ func (c *AmqpClient) TouchHeartbeat() {
 // StartHeartbeat starts the heartbeat goroutines. A negotiated heartbeat of 0
 // disables heartbeats, so nothing is started.
 func (c *AmqpClient) StartHeartbeat() {
-	if c.Config.HeartbeatInterval == 0 {
+	if c.Negotiated.Heartbeat == 0 {
 		return
 	}
 	go c.sendHeartbeats()
@@ -171,7 +153,7 @@ func (c *AmqpClient) recoverHeartbeatPanic(where string) {
 
 func (c *AmqpClient) sendHeartbeats() {
 	defer c.recoverHeartbeatPanic("sendHeartbeats")
-	ticker := time.NewTicker(heartbeatSendInterval(c.Config.HeartbeatInterval))
+	ticker := time.NewTicker(heartbeatSendInterval(c.Negotiated.Heartbeat))
 	defer ticker.Stop()
 
 	for {
@@ -197,7 +179,7 @@ func (c *AmqpClient) monitorHeartbeatTimeout() {
 	for {
 		select {
 		case <-ticker.C:
-			maxInterval := 2 * time.Duration(c.Config.HeartbeatInterval) * time.Second
+			maxInterval := 2 * time.Duration(c.Negotiated.Heartbeat) * time.Second
 			if time.Since(c.LastHeartbeat()) > maxInterval {
 				log.Warn().Str("addr", c.RemoteAddr).Msg("Heartbeat timeout")
 				// Spec 4.2.7: close the socket without a close handshake.

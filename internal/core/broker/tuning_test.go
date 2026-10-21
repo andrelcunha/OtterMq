@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/binary"
 	"net"
 	"sync"
@@ -8,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ottermq/ottermq/config"
 	"github.com/ottermq/ottermq/internal/core/amqp"
+	"github.com/ottermq/ottermq/internal/core/broker/vhost"
 	amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -169,6 +172,34 @@ func dialTuning(t *testing.T, addr string, frameSize int, rewrite func(*tuneOk))
 	return conn, tc, nil
 }
 
+// wantCloseCode waits for the broker to close conn with connection.close code.
+func wantCloseCode(t *testing.T, closed <-chan *amqp091.Error, code int) {
+	t.Helper()
+	select {
+	case err := <-closed:
+		if err == nil {
+			t.Fatalf("connection closed without an error, want connection.close %d", code)
+		}
+		if err.Code != code {
+			t.Fatalf("connection closed with %d (%s), want %d", err.Code, err.Reason, code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("broker did not send connection.close %d", code)
+	}
+}
+
+// methodFrame builds a method frame with the given payload after class/method.
+func methodFrame(channel uint16, classID, methodID uint16, args []byte) []byte {
+	payload := binary.BigEndian.AppendUint16(nil, classID)
+	payload = binary.BigEndian.AppendUint16(payload, methodID)
+	payload = append(payload, args...)
+	frame := []byte{byte(amqp.TYPE_METHOD)}
+	frame = binary.BigEndian.AppendUint16(frame, channel)
+	frame = binary.BigEndian.AppendUint32(frame, uint32(len(payload)))
+	frame = append(frame, payload...)
+	return append(frame, amqp.FRAME_END)
+}
+
 // Heartbeat 0 in tune-ok means "disabled". The broker used to start the
 // heartbeat goroutines anyway: time.NewTicker(0) panicked and the connection
 // was dropped (#177).
@@ -207,4 +238,174 @@ func TestTuneOkHeartbeatOneSendsHeartbeats(t *testing.T) {
 	if _, heartbeats := tc.stats(); heartbeats == 0 {
 		t.Error("broker sent no heartbeat within 1.5 s of negotiating heartbeat 1")
 	}
+}
+
+// The client's heartbeat is capped at the configured maximum (#198).
+func TestTuneOkHeartbeatIsCappedAtServerMax(t *testing.T) {
+	b, _, addr := startTestBroker(t, func(c *config.Config) { c.HeartbeatIntervalMax = 2 }, nil)
+	_, tc, err := dialTuning(t, addr, 0, func(o *tuneOk) { o.heartbeat = 600 })
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	// amqp091 itself picked 2 s and would send heartbeats; silence it so the
+	// only frames on the wire are the broker's.
+	tc.mute.Store(true)
+	t.Cleanup(tc.silence)
+
+	// Capped at 2 s, the broker sends a heartbeat every second; with 600 s
+	// it would send one every 300 s.
+	time.Sleep(1500 * time.Millisecond)
+	if n := connectionCount(b); n != 1 {
+		t.Fatalf("%d connections registered after 1.5 s, want 1", n)
+	}
+	if _, heartbeats := tc.stats(); heartbeats == 0 {
+		t.Error("broker sent no heartbeat within 1.5 s; tune-ok heartbeat 600 was not capped at 2")
+	}
+}
+
+// frame-max below the spec minimum (4096) or above the server's offer is
+// refused with connection.close 530 (#198).
+func TestTuneOkFrameMaxOutOfRangeIsRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		frameMax uint32
+	}{
+		{"below 4096", 1024},
+		{"above server frame-max", 1 << 20},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, addr := startTestBroker(t, func(c *config.Config) { c.FrameMax = 8192 }, nil)
+			_, tc, err := dialTuning(t, addr, 0, func(o *tuneOk) { o.frameMax = tt.frameMax })
+			if err == nil {
+				t.Fatal("dial succeeded, want the broker to refuse the tune-ok")
+			}
+			// amqp091 reports any failure during connection.open as 403, so
+			// read the reply code off the wire.
+			if codes := tc.receivedCloseCodes(); len(codes) != 1 || codes[0] != uint16(amqp.NOT_ALLOWED) {
+				t.Fatalf("connection.close reply codes %v, want [530]", codes)
+			}
+		})
+	}
+}
+
+// channel.open on channel 0 or above the negotiated channel-max is refused
+// with connection.close 530 (#198). tune-ok channel-max 0 means the server's
+// value, not "unlimited".
+func TestChannelOpenOutsideChannelMaxIsRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		tuneOkChanMax uint16
+		channel       uint16
+	}{
+		{"above channel-max", 10, 11},
+		{"tune-ok 0 means server value", 0, 11},
+		{"channel 0", 10, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, addr := startTestBroker(t, func(c *config.Config) { c.ChannelMax = 10 }, nil)
+			conn, tc, err := dialTuning(t, addr, 0, func(o *tuneOk) { o.channelMax = tt.tuneOkChanMax })
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			closed := conn.NotifyClose(make(chan *amqp091.Error, 1))
+			// Past amqp091, which never opens a channel above channel-max.
+			if _, err := tc.Conn.Write(methodFrame(tt.channel, uint16(amqp.CHANNEL), uint16(amqp.CHANNEL_OPEN), []byte{0})); err != nil {
+				t.Fatalf("write channel.open: %v", err)
+			}
+			wantCloseCode(t, closed, amqp091.NotAllowed)
+		})
+	}
+
+	t.Run("at channel-max", func(t *testing.T) {
+		_, _, addr := startTestBroker(t, func(c *config.Config) { c.ChannelMax = 10 }, nil)
+		conn, _, err := dialTuning(t, addr, 0, nil)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		for i := 0; i < 10; i++ { // amqp091 allocates ids 1..10
+			if _, err := conn.Channel(); err != nil {
+				t.Fatalf("channel %d: %v", i+1, err)
+			}
+		}
+	})
+}
+
+// Outgoing bodies are split into body frames of at most frame-max octets.
+// The broker used to send each body as one frame, whatever its size (#198).
+// The 3 x frame-max message is published through the vhost: amqp091 would
+// split it across body frames, which the broker cannot reassemble yet (#221).
+func TestOutgoingBodyIsSplitAtFrameMax(t *testing.T) {
+	const frameMax = 4096
+	body := bytes.Repeat([]byte("0123456789abcdef"), 3*frameMax/16) // 3 x frame-max
+
+	// setup returns an amqp091 channel on a connection that negotiated
+	// frameMax, the name of a queue on it, and a func that publishes body there.
+	setup := func(t *testing.T) (*amqp091.Channel, *tuningConn, string, func()) {
+		t.Helper()
+		b, _, addr := startTestBroker(t, func(c *config.Config) { c.FrameMax = frameMax }, nil)
+		// tune-ok frame-max 0 means the server's value.
+		conn, tc, err := dialTuning(t, addr, 0, func(o *tuneOk) { o.frameMax = 0 })
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		ch, err := conn.Channel()
+		if err != nil {
+			t.Fatalf("channel: %v", err)
+		}
+		q, err := ch.QueueDeclare("", false, true, false, false, nil)
+		if err != nil {
+			t.Fatalf("queue.declare: %v", err)
+		}
+		publish := func() {
+			msg := &vhost.Message{ID: "big", Body: body, RoutingKey: q.Name}
+			if _, err := b.GetVHost(DEFAULT_VHOST).Publish("", q.Name, msg); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+		}
+		return ch, tc, q.Name, publish
+	}
+	checkFrames := func(t *testing.T, tc *tuningConn, got []byte) {
+		t.Helper()
+		if !bytes.Equal(got, body) {
+			t.Fatalf("got a %d-byte body, want the %d bytes sent", len(got), len(body))
+		}
+		if maxBody, _ := tc.stats(); maxBody > frameMax {
+			t.Errorf("largest body frame is %d octets, want at most frame-max %d", maxBody, frameMax)
+		}
+	}
+
+	t.Run("basic.deliver", func(t *testing.T) {
+		ch, tc, q, publish := setup(t)
+		msgs, err := ch.Consume(q, "", true, false, false, false, nil)
+		if err != nil {
+			t.Fatalf("consume: %v", err)
+		}
+		publish()
+		select {
+		case m := <-msgs:
+			checkFrames(t, tc, m.Body)
+		case <-time.After(3 * time.Second):
+			t.Fatal("message not delivered")
+		}
+	})
+
+	t.Run("basic.get-ok", func(t *testing.T) {
+		ch, tc, q, publish := setup(t)
+		publish()
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			m, ok, err := ch.Get(q, true)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if ok {
+				checkFrames(t, tc, m.Body)
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("basic.get found no message")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 }
