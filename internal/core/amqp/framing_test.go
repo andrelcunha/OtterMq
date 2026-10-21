@@ -219,7 +219,8 @@ func TestGetSmalestShortInt(t *testing.T) {
 		{"Both non-zero, b smaller", 30, 15, 15},
 		{"a is zero", 0, 25, 25},
 		{"b is zero", 35, 0, 35},
-		{"Both zero", 0, 0, 32767}, // When both are 0, they're treated as MaxInt16 (32767)
+		{"b is zero, a above MaxInt16", 40000, 0, 40000},
+		{"Both zero", 0, 0, 65535}, // Both are "no preference", so the unsigned max is returned
 		{"Equal values", 50, 50, 50},
 	}
 
@@ -244,7 +245,8 @@ func TestGetSmalestLongInt(t *testing.T) {
 		{"Both non-zero, b smaller", 300, 150, 150},
 		{"a is zero", 0, 250, 250},
 		{"b is zero", 350, 0, 350},
-		{"Both zero", 0, 0, 2147483647}, // When both are 0, they're treated as MaxInt32 (2147483647)
+		{"b is zero, a above MaxInt32", 3000000000, 0, 3000000000},
+		{"Both zero", 0, 0, 4294967295}, // Both are "no preference", so the unsigned max is returned
 		{"Equal values", 500, 500, 500},
 	}
 

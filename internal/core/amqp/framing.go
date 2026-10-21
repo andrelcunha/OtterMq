@@ -154,7 +154,7 @@ func getSmalestShortInt(a, b uint16) uint16 {
 		a = math.MaxUint16
 	}
 	if b == 0 {
-		b = math.MaxInt16
+		b = math.MaxUint16
 	}
 	if a < b {
 		return a
@@ -167,7 +167,7 @@ func getSmalestLongInt(a, b uint32) uint32 {
 		a = math.MaxUint32
 	}
 	if b == 0 {
-		b = math.MaxInt32
+		b = math.MaxUint32
 	}
 	if a < b {
 		return a
