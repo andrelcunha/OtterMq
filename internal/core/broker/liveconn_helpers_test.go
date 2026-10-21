@@ -92,6 +92,8 @@ type faultyFramer struct {
 	panicNextHandshake atomic.Bool
 	// onPoison, if set, runs right before ParseFrame panics on a poison frame.
 	onPoison func()
+	// afterHandshake, if set, runs after a real handshake completes.
+	afterHandshake func()
 }
 
 // poisonChannel marks frames that make faultyFramer.ParseFrame panic. Real
@@ -105,7 +107,11 @@ func (f *faultyFramer) Handshake(configurations *map[string]any, conn net.Conn, 
 	if f.panicNextHandshake.CompareAndSwap(true, false) {
 		panic("injected handshake panic")
 	}
-	return f.Framer.Handshake(configurations, conn, connCtx)
+	info, err := f.Framer.Handshake(configurations, conn, connCtx)
+	if f.afterHandshake != nil {
+		f.afterHandshake()
+	}
+	return info, err
 }
 
 func (f *faultyFramer) ParseFrame(frame []byte) (any, error) {
@@ -206,6 +212,10 @@ func (c *tapConn) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// testHeartbeat is amqp091's usual default. Heartbeat 0 is not usable yet:
+// the broker then times the connection out within a second (#177, #198).
+const testHeartbeat = 10 * time.Second
 
 // dialTap opens an amqp091 connection and returns it with its tapConn.
 func dialTap(t *testing.T, addr string, heartbeat time.Duration) (*amqp091.Connection, *tapConn) {

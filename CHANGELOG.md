@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INTERNAL_ERROR`, closes only that connection and counts it in the new
   `ottermq_connection_panics_total` metric. If cleanup after the panic is blocked by a lock the
   panicking handler left held, the broker exits after 10 s instead of hanging (#194).
+- A client that connects and then sends nothing (or stalls mid-handshake) no longer blocks every
+  other client from connecting. Handshakes run concurrently and must finish within the new
+  `OTTERMQ_HANDSHAKE_TIMEOUT` (default `10s`); the broker closes the socket on timeout, after a
+  bad protocol header and on any other handshake failure. Each client is now offered the
+  configured heartbeat, frame-max and channel-max instead of the values the previous client sent
+  back (#195).
 
 ## [v0.20.0]
 

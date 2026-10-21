@@ -24,6 +24,7 @@ OtterMQ is configured via environment variables. All settings have sensible defa
 | `OTTERMQ_CHANNEL_MAX` | `2048` | Maximum number of channels per connection |
 | `OTTERMQ_FRAME_MAX` | `131072` | Maximum frame size in bytes (128 KB) |
 | `OTTERMQ_SSL` | `false` | Enable SSL/TLS for AMQP connections |
+| `OTTERMQ_HANDSHAKE_TIMEOUT` | `10s` | Time a client has to finish the AMQP handshake before the broker closes the socket (duration format; non-positive values mean the default) |
 
 ### Message Processing
 

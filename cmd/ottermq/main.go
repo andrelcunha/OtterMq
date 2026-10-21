@@ -78,7 +78,7 @@ func main() {
 	<-stop
 	log.Info().Msg("Shutting down OtterMQ...")
 	cancel()
-	b.ShuttingDown.Store(true)
+	b.BeginShutdown()
 
 	// Broadcast connection close to all channels
 	b.BroadcastConnectionClose()

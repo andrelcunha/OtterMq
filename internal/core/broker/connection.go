@@ -132,8 +132,16 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 	}
 }
 
-func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) {
+// registerConnection adds a connection that finished its handshake. It
+// returns false, registering nothing, once the broker is shutting down. The
+// check runs under b.mu, which BroadcastConnectionClose also holds, so a
+// connection either gets the shutdown connection.close or is refused here.
+func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) bool {
 	b.mu.Lock()
+	if b.ShuttingDown.Load() {
+		b.mu.Unlock()
+		return false
+	}
 	b.Connections[conn] = connInfo
 	b.mu.Unlock()
 
@@ -145,6 +153,7 @@ func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo
 	b.connectionsMu.Unlock()
 
 	b.collector.RecordConnection()
+	return true
 }
 
 func (b *Broker) cleanupConnection(conn net.Conn) {

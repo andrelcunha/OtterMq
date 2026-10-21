@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoadConfigWithDefaults(t *testing.T) {
@@ -209,5 +210,17 @@ func TestMaxPriorityConfiguration(t *testing.T) {
 				t.Errorf("Expected MaxPriority=%d, got %d", tt.expected, config.MaxPriority)
 			}
 		})
+	}
+}
+
+func TestLoadConfigHandshakeTimeout(t *testing.T) {
+	os.Clearenv()
+	if got := LoadConfig("test-version").HandshakeTimeout; got != 10*time.Second {
+		t.Errorf("Expected HandshakeTimeout to default to 10s, got %s", got)
+	}
+
+	t.Setenv("OTTERMQ_HANDSHAKE_TIMEOUT", "2500ms")
+	if got := LoadConfig("test-version").HandshakeTimeout; got != 2500*time.Millisecond {
+		t.Errorf("Expected HandshakeTimeout to be 2.5s, got %s", got)
 	}
 }
