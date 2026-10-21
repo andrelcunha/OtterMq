@@ -3,6 +3,7 @@ package broker
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -328,6 +329,76 @@ func TestChannelOpenOutsideChannelMaxIsRefused(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A frame header declaring more than frame-max is refused with
+// connection.close 501 before the payload is read or allocated (#179). The
+// declared size is 2 x frame-max, so the run before the fix stays harmless.
+func TestFrameAboveFrameMaxIsRefused(t *testing.T) {
+	const frameMax = 4096
+	_, _, addr := startTestBroker(t, func(c *config.Config) { c.FrameMax = frameMax }, nil)
+	conn, tc, err := dialTuning(t, addr, 0, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	closed := conn.NotifyClose(make(chan *amqp091.Error, 1))
+
+	header := []byte{byte(amqp.TYPE_BODY), 0, 1}
+	header = binary.BigEndian.AppendUint32(header, 2*frameMax)
+	if _, err := tc.Conn.Write(header); err != nil {
+		t.Fatalf("write frame header: %v", err)
+	}
+	wantCloseCode(t, closed, amqp091.FrameError)
+}
+
+// The same limit applies during the handshake, before tune-ok, using the
+// server's configured frame-max (#179).
+func TestHandshakeFrameAboveFrameMaxIsRefused(t *testing.T) {
+	const frameMax = 4096
+	_, _, addr := startTestBroker(t, func(c *config.Config) {
+		c.FrameMax = frameMax
+		c.HandshakeTimeout = 5 * time.Second
+	}, nil)
+
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Write([]byte("AMQP\x00\x00\x09\x01")); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	// In place of start-ok: a frame header declaring 2 x frame-max.
+	header := []byte{byte(amqp.TYPE_METHOD), 0, 0}
+	header = binary.BigEndian.AppendUint32(header, 2*frameMax)
+	if _, err := raw.Write(header); err != nil {
+		t.Fatalf("write frame header: %v", err)
+	}
+
+	// Well inside the handshake timeout, the broker sends connection.start,
+	// then connection.close 501, and closes the socket.
+	_ = raw.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got, err := io.ReadAll(raw)
+	if err != nil {
+		t.Fatalf("socket ended with %v, want EOF from the broker after connection.close", err)
+	}
+	var replyCodes []uint16
+	for len(got) >= 8 {
+		size := int(binary.BigEndian.Uint32(got[3:7]))
+		if len(got) < 7+size+1 {
+			break
+		}
+		payload := got[7 : 7+size]
+		if got[0] == byte(amqp.TYPE_METHOD) && size >= 6 &&
+			binary.BigEndian.Uint16(payload[0:2]) == uint16(amqp.CONNECTION) &&
+			binary.BigEndian.Uint16(payload[2:4]) == uint16(amqp.CONNECTION_CLOSE) {
+			replyCodes = append(replyCodes, binary.BigEndian.Uint16(payload[4:6]))
+		}
+		got = got[7+size+1:]
+	}
+	if len(replyCodes) != 1 || replyCodes[0] != uint16(amqp.FRAME_ERROR) {
+		t.Fatalf("connection.close reply codes %v, want [501]", replyCodes)
+	}
 }
 
 // Outgoing bodies are split into body frames of at most frame-max octets.

@@ -3,6 +3,7 @@ package amqp
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -182,7 +183,7 @@ func TestReadFrame_ValidFrame(t *testing.T) {
 
 	conn := newMockConn(frameData)
 
-	receivedFrame, err := readFrame(conn)
+	receivedFrame, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err != nil {
 		t.Fatalf("readFrame failed: %v", err)
 	}
@@ -205,7 +206,7 @@ func TestReadFrame_InvalidFrameEnd(t *testing.T) {
 
 	conn := newMockConn(frameData)
 
-	_, err := readFrame(conn)
+	_, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err == nil {
 		t.Fatal("Expected error for invalid frame-end, got nil")
 	}
@@ -235,7 +236,7 @@ func TestReadFrame_WithPayload(t *testing.T) {
 
 	conn := newMockConn(frameData)
 
-	receivedFrame, err := readFrame(conn)
+	receivedFrame, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err != nil {
 		t.Fatalf("readFrame failed: %v", err)
 	}
@@ -286,7 +287,7 @@ func TestReadFrame_IncompleteHeader(t *testing.T) {
 	frameData := []byte{0x01, 0x00, 0x00, 0x00, 0x00}
 	conn := newMockConn(frameData)
 
-	_, err := readFrame(conn)
+	_, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err == nil {
 		t.Fatal("Expected error for incomplete header, got nil")
 	}
@@ -303,7 +304,7 @@ func TestReadFrame_IncompletePayload(t *testing.T) {
 
 	conn := newMockConn(frameData)
 
-	_, err := readFrame(conn)
+	_, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err == nil {
 		t.Fatal("Expected error for incomplete payload, got nil")
 	}
@@ -331,7 +332,7 @@ func TestFrameRoundTrip(t *testing.T) {
 	sentData := sendConn.writeBuf.Bytes()
 	readConn := newMockConn(sentData)
 
-	receivedFrame, err := readFrame(readConn)
+	receivedFrame, err := readFrame(readConn, DEFAULT_FRAME_MAX)
 	if err != nil {
 		t.Fatalf("readFrame failed: %v", err)
 	}
@@ -384,7 +385,7 @@ func TestMultipleFramesSequence(t *testing.T) {
 	conn := newMockConn(data.Bytes())
 
 	// Read first frame
-	receivedFrame1, err := readFrame(conn)
+	receivedFrame1, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err != nil {
 		t.Fatalf("readFrame (1st) failed: %v", err)
 	}
@@ -395,7 +396,7 @@ func TestMultipleFramesSequence(t *testing.T) {
 	}
 
 	// Read second frame
-	receivedFrame2, err := readFrame(conn)
+	receivedFrame2, err := readFrame(conn, DEFAULT_FRAME_MAX)
 	if err != nil {
 		t.Fatalf("readFrame (2nd) failed: %v", err)
 	}
@@ -414,8 +415,9 @@ func TestFrameMaxSizeCompliance(t *testing.T) {
 	}{
 		{"Small frame (100 bytes)", 100, true},
 		{"Medium frame (1KB)", 1024, true},
-		{"Large frame (128KB)", 131072, true},
-		{"Standard max (128KB)", 131072, true},
+		// frame-max counts the 7-octet header and the frame-end octet.
+		{"Largest payload within frame-max", DEFAULT_FRAME_MAX - FRAME_OVERHEAD, true},
+		{"One octet over frame-max", DEFAULT_FRAME_MAX - FRAME_OVERHEAD + 1, false},
 	}
 
 	for _, tt := range tests {
@@ -440,7 +442,7 @@ func TestFrameMaxSizeCompliance(t *testing.T) {
 
 			conn := newMockConn(frameData)
 
-			receivedFrame, err := readFrame(conn)
+			receivedFrame, err := readFrame(conn, DEFAULT_FRAME_MAX)
 			if tt.shouldPass {
 				if err != nil {
 					t.Fatalf("readFrame failed: %v", err)
@@ -450,6 +452,11 @@ func TestFrameMaxSizeCompliance(t *testing.T) {
 				receivedPayloadSize := binary.BigEndian.Uint32(receivedFrame[3:7])
 				if receivedPayloadSize != tt.payloadSize {
 					t.Errorf("Expected payload size %d, got %d", tt.payloadSize, receivedPayloadSize)
+				}
+			} else {
+				var tooLarge *FrameTooLargeError
+				if !errors.As(err, &tooLarge) {
+					t.Fatalf("readFrame returned %v, want *FrameTooLargeError", err)
 				}
 			}
 		})

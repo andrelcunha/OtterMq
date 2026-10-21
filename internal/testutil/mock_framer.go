@@ -14,7 +14,7 @@ type MockFramer struct {
 	SendError  error    // If non-nil, SendFrame returns this error
 }
 
-func (m *MockFramer) ReadFrame(conn net.Conn) ([]byte, error) { return nil, nil }
+func (m *MockFramer) ReadFrame(conn net.Conn, frameMax uint32) ([]byte, error) { return nil, nil }
 
 func (m *MockFramer) SendFrame(conn net.Conn, frame []byte) error {
 	if m.SendError != nil {
