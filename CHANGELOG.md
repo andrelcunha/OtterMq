@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.21.0]
+
+> **Not production-ready.** OtterMQ is pre-1.0. This release fixes several crashes that a client
+> could trigger before authentication, but stop-ship issues remain open (default admin
+> credentials, missing web API authorization, path traversal in persistence, deadlocks); see the
+> [Phase 0 milestone](https://github.com/ottermq/ottermq/milestone/8) and the
+> [production readiness roadmap](https://github.com/ottermq/ottermq/issues/271). Don't expose the
+> broker or its web API to untrusted networks.
+
+### Upgrade notes
+
+- `OTTERMQ_FRAME_MAX=0` now means 131072 (it used to mean "no limit"), and values below 4096
+  are raised to 4096. Frames larger than the negotiated frame-max close the connection with 501.
+- `OTTERMQ_HEARTBEAT_INTERVAL=0` now means "no cap": the client's heartbeat is used. A client
+  that answers heartbeat 0 disables heartbeats for its connection.
+- Clients that exceed the negotiated limits are now disconnected: `connection.tune-ok` with a
+  frame-max out of range, or `channel.open` on channel 0 or above channel-max, gets
+  `connection.close` 530.
+- Acking an unknown delivery tag now closes the channel with 406, as RabbitMQ does.
+- Handshakes must finish within `OTTERMQ_HANDSHAKE_TIMEOUT` (default `10s`).
+- Every JSON persistence write is now fsynced, so persistent publishing to durable queues is
+  slower on disks with expensive fsync.
+
+### Added
+
+- `OTTERMQ_HANDSHAKE_TIMEOUT` (default `10s`) and the `ottermq_connection_panics_total` metric
+  (#194, #195).
+- An `edge` Docker image (`ghcr.io/ottermq/ottermq:edge`) is published from the `dev` branch,
+  where pull requests are now merged. `latest` is published from `main`, which now changes only
+  when a release is made, so `latest` is always the latest release.
+
 ### Fixed
 
 - Deleting a queue now removes its bindings from every exchange, not just direct and fanout
@@ -585,7 +616,9 @@ For releases prior to v0.7.1, please refer to [GitHub Releases](https://github.c
 
 ---
 
-[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.19.3...HEAD
+[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.21.0...HEAD
+[v0.21.0]: https://github.com/ottermq/ottermq/releases/tag/v0.21.0
+[v0.20.0]: https://github.com/ottermq/ottermq/releases/tag/v0.20.0
 [v0.19.3]: https://github.com/ottermq/ottermq/releases/tag/v0.19.3
 [v0.19.2]: https://github.com/ottermq/ottermq/releases/tag/v0.19.2
 [v0.19.1]: https://github.com/ottermq/ottermq/releases/tag/v0.19.1

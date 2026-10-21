@@ -188,7 +188,7 @@ ottermq
 
 ## 🐳 Docker
 
-Images are published to the GitHub Container Registry: `latest` from `main`, and a version tag (e.g. `0.20.0` and `0.20`) for each `v*` release tag.
+Images are published to the GitHub Container Registry: `latest` from `main` (the latest release), a version tag (e.g. `0.20.0` and `0.20`) for each `v*` release tag, and `edge` from `dev`, which has every merged change but isn't released yet.
 
 ```sh
 docker run -p 5672:5672 -p 3000:3000 ghcr.io/ottermq/ottermq:latest
