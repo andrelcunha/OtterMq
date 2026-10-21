@@ -78,7 +78,8 @@ func (b *Broker) handleConnectionPanic(conn net.Conn, connInfo *amqp.ConnectionI
 	}
 
 	if connInfo != nil {
-		connInfo.Client.Cancel()
+		connInfo.Client.CloseConn()
+	} else {
+		conn.Close()
 	}
-	conn.Close()
 }

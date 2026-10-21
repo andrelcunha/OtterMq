@@ -56,7 +56,11 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 		}
 
 		if len(frame) > 0 { // any octet shall be valid as heartbeat #AMQP_compliance
-			b.registerHeartbeat(conn)
+			if !b.registerHeartbeat(conn) {
+				log.Debug().Str("client", conn.RemoteAddr().String()).Msg("Connection already cleaned up, closing socket")
+				client.CloseConn()
+				return
+			}
 		}
 
 		//Process frame
@@ -175,7 +179,9 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 	delete(b.connToID, conn)
 	b.connectionsMu.Unlock()
 
-	connInfo.Client.Ctx.Done()
+	// Unblocks this connection's reader, which then exits through its own
+	// (idempotent) cleanup path.
+	connInfo.Client.CloseConn()
 	vh := b.GetVHost(vhName)
 	if vh != nil && hasConnID {
 		vh.CleanupConnection(connID)
@@ -220,24 +226,20 @@ func (b *Broker) sendConnectionClosing(conn net.Conn, channel, replyCode, method
 }
 
 func (b *Broker) connectionCloseOk(conn net.Conn) {
-	b.cleanupConnection(conn)
-	conn.Close()
+	b.cleanupConnection(conn) // closes the socket
 }
 
-// registerHeartbeat registers a heartbeat for a connection
-func (b *Broker) registerHeartbeat(conn net.Conn) {
+// registerHeartbeat registers a heartbeat for a connection. It returns false
+// if the connection is no longer registered, i.e. it was already cleaned up.
+func (b *Broker) registerHeartbeat(conn net.Conn) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if connInfo, exists := b.Connections[conn]; exists {
-		connInfo.Client.LastHeartbeat = time.Now()
-	} else {
-		// it means that the connection was closed
-		// verify if the connection is still alive
-		if _, err := conn.Write([]byte{}); err != nil {
-			log.Debug().Err(err).Msg("Connection seems to be closed, cleaning up")
-			b.cleanupConnection(conn)
-		}
+	connInfo, exists := b.Connections[conn]
+	if !exists {
+		return false
 	}
+	connInfo.Client.LastHeartbeat = time.Now()
+	return true
 }
 
 func (b *Broker) BroadcastConnectionClose() {

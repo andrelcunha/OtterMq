@@ -21,6 +21,7 @@ type AmqpClient struct {
 	Config        *AmqpClientConfig
 
 	recoveredPanic atomic.Bool
+	closeOnce      sync.Once
 }
 
 type AmqpClientConfig struct {
@@ -37,10 +38,12 @@ func NewAmqpClient(conn net.Conn, config *AmqpClientConfig, connCtx context.Cont
 	client := &AmqpClient{
 		RemoteAddr:  conn.RemoteAddr().String(),
 		ConnectedAt: time.Now(),
-		Conn:        conn,
-		Ctx:         connCtx,
-		Cancel:      cancel,
-		Config:      config,
+		// Silence is measured from the handshake until the first frame.
+		LastHeartbeat: time.Now(),
+		Conn:          conn,
+		Ctx:           connCtx,
+		Cancel:        cancel,
+		Config:        config,
 	}
 
 	return client
@@ -114,6 +117,18 @@ func (c *AmqpClient) StartHeartbeat() {
 	go c.monitorHeartbeatTimeout()
 }
 
+// CloseConn cancels the connection's context and closes its socket. It is the
+// one place the broker closes a client socket; later calls do nothing.
+// Closing the socket is what unblocks a reader stuck in ReadFrame.
+func (c *AmqpClient) CloseConn() {
+	c.closeOnce.Do(func() {
+		c.Cancel()
+		if err := c.Conn.Close(); err != nil {
+			log.Debug().Err(err).Str("client", c.RemoteAddr).Msg("Error closing connection")
+		}
+	})
+}
+
 // RecoveredPanic reports whether one of the client's heartbeat goroutines
 // panicked and cancelled the connection.
 func (c *AmqpClient) RecoveredPanic() bool {
@@ -132,8 +147,7 @@ func (c *AmqpClient) recoverHeartbeatPanic(where string) {
 			Str("stack", string(debug.Stack())).
 			Msg("Recovered panic in heartbeat goroutine, closing connection")
 		c.recoveredPanic.Store(true)
-		c.Cancel()
-		c.Conn.Close()
+		c.CloseConn()
 	}
 }
 
@@ -169,7 +183,9 @@ func (c *AmqpClient) monitorHeartbeatTimeout() {
 			maxInterval := time.Duration(c.Config.HeartbeatInterval<<1) * time.Second
 			if time.Since(c.LastHeartbeat) > maxInterval {
 				log.Warn().Str("addr", c.RemoteAddr).Msg("Heartbeat timeout")
-				c.Cancel() // triggers cleanup
+				// Spec 4.2.7: close the socket without a close handshake.
+				// Cleanup follows via monitorConnectionLifecycle.
+				c.CloseConn()
 				return
 			}
 		case <-c.Ctx.Done():
