@@ -1,6 +1,14 @@
-.bin
+# Version control metadata is kept: `make build` runs `git describe --tags`.
+bin/
+data/
+ui/
+.env
 server.log
 .vscode
 .github
 docker-compose.yml
 Dockerfile
+**/node_modules
+**/dist
+web/ui/build
+web/ui/.svelte-kit
