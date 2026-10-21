@@ -213,8 +213,7 @@ func (c *tapConn) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// testHeartbeat is amqp091's usual default. Heartbeat 0 is not usable yet:
-// the broker then times the connection out within a second (#177, #198).
+// testHeartbeat is amqp091's usual default.
 const testHeartbeat = 10 * time.Second
 
 // dialTap opens an amqp091 connection and returns it with its tapConn.
