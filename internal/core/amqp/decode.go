@@ -92,8 +92,8 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 			table[string(fieldName)] = val
 
 		case 'L': // Long long signed integer (64-bit)
-			val, err1 := DecodeLongLongInt(buf)
-			if err1 != nil {
+			val, err := DecodeLongLongInt(buf)
+			if err != nil {
 				return nil, err
 			}
 			table[string(fieldName)] = val
