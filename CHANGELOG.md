@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A broker restarted on a data dir that holds persistent messages no longer panics while
+  recovering the vhost; the messages are back in their durable queues and can be consumed (#233).
 - AMQP field tables, arrays and strings that declare more bytes than the frame carries are now
   rejected instead of being accepted with the missing bytes zero-padded. An empty string as the
   last field of a table is no longer rejected (#197, #273 — thanks @tnalbant).

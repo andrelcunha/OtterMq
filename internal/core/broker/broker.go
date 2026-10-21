@@ -127,10 +127,12 @@ func (b *Broker) SetupMetricsCollector(collector metrics.MetricsCollector, start
 }
 
 func initializeVHost(vhostName string, options vhost.VHostOptions, b *Broker) *vhost.VHost {
+	// The collector goes in through the options so it is in place before
+	// NewVhost replays persisted messages (#233).
+	options.Collector = b.collector
 	vh := vhost.NewVhost(vhostName, options)
 	vh.SetFrameSender(b)
 	vh.SetFramer(b.framer)
-	vh.SetMetricsCollector(b.collector)
 	return vh
 }
 
