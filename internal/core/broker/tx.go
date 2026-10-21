@@ -150,6 +150,14 @@ func (b *Broker) txCommitHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 
 	// If there were any errors, we need to rollback the transaction
 	if len(publishErrors) > 0 || len(ackErrors) > 0 {
+		// An unknown delivery tag is a channel exception, not an internal error:
+		// surface it as-is so the client gets 406 PRECONDITION_FAILED.
+		for _, ackErr := range ackErrors {
+			if _, isChannelError := ackErr.(*errors.ChannelError); isChannelError {
+				return sendChannelErrorResponse(ackErr, b, conn, request)
+			}
+		}
+
 		errMsg := fmt.Sprintf("Transaction commit failed: %d publish errors, %d ack errors",
 			len(publishErrors), len(ackErrors))
 		log.Error().

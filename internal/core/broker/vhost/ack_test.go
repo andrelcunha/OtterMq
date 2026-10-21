@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ottermq/ottermq/pkg/metrics"
 	"github.com/google/uuid"
+	"github.com/ottermq/ottermq/internal/core/amqp"
+	amqperr "github.com/ottermq/ottermq/internal/core/amqp/errors"
+	"github.com/ottermq/ottermq/pkg/metrics"
 )
 
 // helper to build a minimal consumer
@@ -256,4 +258,144 @@ func TestCleanupChannel_RequeuesUnacked(t *testing.T) {
 	if exists {
 		t.Fatalf("expected ChannelDeliveries entry to be removed after cleanup")
 	}
+}
+
+// newAckTestVhost builds a vhost with a channel holding n outstanding deliveries.
+func newAckTestVhost(t *testing.T, channel uint16, n int) (*VHost, ConnectionID, *ChannelDeliveryState) {
+	t.Helper()
+	vh := NewVhost("test-vhost", VHostOptions{
+		QueueBufferSize: 1000,
+		Persistence:     nil,
+	})
+	vh.SetMetricsCollector(metrics.NewCollector(&metrics.Config{Enabled: false}, context.Background()))
+	connID := newTestConsumerConnID()
+	key := ConnectionChannelKey{ConnectionID: connID, Channel: channel}
+	ch := &ChannelDeliveryState{
+		UnackedByTag:      make(map[uint64]*DeliveryRecord),
+		UnackedByConsumer: make(map[string]map[uint64]*DeliveryRecord),
+	}
+	c := newTestConsumer(connID, channel, "q-ack", false)
+	for i := 0; i < n; i++ {
+		ch.LastDeliveryTag++
+		record := &DeliveryRecord{DeliveryTag: ch.LastDeliveryTag, ConsumerTag: c.Tag, QueueName: c.QueueName}
+		ch.UnackedByTag[record.DeliveryTag] = record
+		if ch.UnackedByConsumer[c.Tag] == nil {
+			ch.UnackedByConsumer[c.Tag] = make(map[uint64]*DeliveryRecord)
+		}
+		ch.UnackedByConsumer[c.Tag][record.DeliveryTag] = record
+	}
+	vh.mu.Lock()
+	vh.ChannelDeliveries[key] = ch
+	vh.mu.Unlock()
+	return vh, connID, ch
+}
+
+func requireChannelError(t *testing.T, err error, methodID uint16) *amqperr.ChannelError {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a channel error, got nil")
+	}
+	channelErr, ok := err.(*amqperr.ChannelError)
+	if !ok {
+		t.Fatalf("expected *errors.ChannelError, got %T: %v", err, err)
+	}
+	if channelErr.ReplyCode() != uint16(amqp.PRECONDITION_FAILED) {
+		t.Errorf("expected reply code %d, got %d", uint16(amqp.PRECONDITION_FAILED), channelErr.ReplyCode())
+	}
+	if channelErr.ClassID() != uint16(amqp.BASIC) {
+		t.Errorf("expected class id %d, got %d", uint16(amqp.BASIC), channelErr.ClassID())
+	}
+	if channelErr.MethodID() != methodID {
+		t.Errorf("expected method id %d, got %d", methodID, channelErr.MethodID())
+	}
+	return channelErr
+}
+
+func TestAckUnknownTagIsChannelError(t *testing.T) {
+	vh, connID, ch := newAckTestVhost(t, 1, 1)
+
+	err := vh.HandleBasicAck(connID, 1, 999, false)
+	requireChannelError(t, err, uint16(amqp.BASIC_ACK))
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if _, exists := ch.UnackedByTag[1]; !exists {
+		t.Fatalf("unknown tag ack must not remove outstanding delivery 1")
+	}
+}
+
+func TestAckDoubleAckIsChannelError(t *testing.T) {
+	vh, connID, ch := newAckTestVhost(t, 1, 1)
+
+	if err := vh.HandleBasicAck(connID, 1, 1, false); err != nil {
+		t.Fatalf("first ack failed: %v", err)
+	}
+	err := vh.HandleBasicAck(connID, 1, 1, false)
+	requireChannelError(t, err, uint16(amqp.BASIC_ACK))
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if len(ch.UnackedByTag) != 0 {
+		t.Fatalf("expected no unacked deliveries, got %d", len(ch.UnackedByTag))
+	}
+}
+
+func TestAckWithoutChannelStateIsChannelError(t *testing.T) {
+	vh := NewVhost("test-vhost", VHostOptions{QueueBufferSize: 1000})
+	connID := newTestConsumerConnID()
+
+	err := vh.HandleBasicAck(connID, 1, 5, false)
+	requireChannelError(t, err, uint16(amqp.BASIC_ACK))
+}
+
+func TestAckMultipleZeroAcksAllOutstanding(t *testing.T) {
+	vh, connID, ch := newAckTestVhost(t, 1, 3)
+
+	if err := vh.HandleBasicAck(connID, 1, 0, true); err != nil {
+		t.Fatalf("multiple ack with tag 0 failed: %v", err)
+	}
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if len(ch.UnackedByTag) != 0 {
+		t.Fatalf("expected all deliveries acked, %d remain", len(ch.UnackedByTag))
+	}
+}
+
+func TestAckMultipleUnknownTagIsChannelError(t *testing.T) {
+	vh, connID, ch := newAckTestVhost(t, 1, 3)
+
+	err := vh.HandleBasicAck(connID, 1, 99, true)
+	requireChannelError(t, err, uint16(amqp.BASIC_ACK))
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if len(ch.UnackedByTag) != 3 {
+		t.Fatalf("failed multiple ack must not remove deliveries, %d remain", len(ch.UnackedByTag))
+	}
+}
+
+func TestAckMultipleZeroWithoutChannelStateIsNoOp(t *testing.T) {
+	vh := NewVhost("test-vhost", VHostOptions{QueueBufferSize: 1000})
+	connID := newTestConsumerConnID()
+
+	if err := vh.HandleBasicAck(connID, 1, 0, true); err != nil {
+		t.Fatalf("multiple ack with tag 0 on an empty channel must be a no-op, got: %v", err)
+	}
+}
+
+func TestNackUnknownTagReportsNackMethod(t *testing.T) {
+	vh := NewVhost("test-vhost", VHostOptions{QueueBufferSize: 1000})
+	connID := newTestConsumerConnID()
+
+	err := vh.HandleBasicNack(connID, 1, 7, false, false)
+	requireChannelError(t, err, uint16(amqp.BASIC_NACK))
+}
+
+func TestRejectUnknownTagReportsRejectMethod(t *testing.T) {
+	vh := NewVhost("test-vhost", VHostOptions{QueueBufferSize: 1000})
+	connID := newTestConsumerConnID()
+
+	err := vh.HandleBasicReject(connID, 1, 7, false)
+	requireChannelError(t, err, uint16(amqp.BASIC_REJECT))
 }
