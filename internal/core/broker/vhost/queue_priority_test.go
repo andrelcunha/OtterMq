@@ -219,7 +219,7 @@ func TestRequeueOnShutdown_PriorityQueue(t *testing.T) {
 		t.Fatal("expected non-nil message from Pop")
 	}
 
-	requeueOnShutdown(queue, *msg)
+	requeueOnShutdown(queue, *msg, false) // popped but not delivered
 
 	// The message must be back in the priority queue, not lost.
 	if queue.Len() != 2 {
@@ -245,7 +245,7 @@ func TestRequeueOnShutdown_FIFOQueue(t *testing.T) {
 		t.Fatal("expected non-nil message from Pop")
 	}
 
-	requeueOnShutdown(queue, *msg)
+	requeueOnShutdown(queue, *msg, false) // popped but not delivered
 
 	if queue.Len() != 2 {
 		t.Fatalf("expected 2 messages after requeue, got %d", queue.Len())
