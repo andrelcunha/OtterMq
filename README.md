@@ -390,6 +390,12 @@ Notes:
 - The GitHub Pages site is separate from the Swagger UI served at `/docs` by the running server. The Pages site documents status and specs; the Swagger UI documents the REST API.
 - When adding or changing AMQP features (classes/methods), please also update the Pages content under `/docs` and merge it into the `pages` branch so the site stays current.
 
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) to get set up. Good places to start:
+- [Good first issues](https://github.com/ottermq/ottermq/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22): small, well-described fixes.
+- The [production readiness roadmap](https://github.com/ottermq/ottermq/issues/271): the big picture, with a map of the codebase.
+
 ## ⚖️ License
 
 OtterMQ is released under the MIT License. See [License](https://github.com/ottermq/ottermq/blob/main/LICENSE) for more information.
