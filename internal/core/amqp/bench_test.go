@@ -77,7 +77,7 @@ func BenchmarkReadFrame(b *testing.B) {
 		frames = append(frames, struct {
 			name  string
 			frame []byte
-		}{"body/" + sizeName(n), createBodyFrame(1, make([]byte, n))})
+		}{"body/" + sizeName(n), createBodyFrame(1, 0, make([]byte, n))})
 	}
 
 	for _, f := range frames {
@@ -87,7 +87,7 @@ func BenchmarkReadFrame(b *testing.B) {
 			conn := &readerConn{}
 			for i := 0; i < b.N; i++ {
 				conn.r.Reset(f.frame)
-				if _, err := readFrame(conn); err != nil {
+				if _, err := readFrame(conn, uint32(len(f.frame))); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -103,7 +103,7 @@ func BenchmarkParseFrame(b *testing.B) {
 	}{
 		{"method/basic.publish", formatMethodFrame(1, BASIC, TypeMethod(BASIC_PUBLISH), benchPublishPayload())},
 		{"header", createHeaderFrame(1, uint16(BASIC), benchMessage(1024))},
-		{"body/1KiB", createBodyFrame(1, make([]byte, 1<<10))},
+		{"body/1KiB", createBodyFrame(1, 0, make([]byte, 1<<10))},
 	}
 	for _, f := range frames {
 		b.Run(f.name, func(b *testing.B) {
@@ -157,7 +157,7 @@ func BenchmarkCreateBodyFrame(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(n))
 			for i := 0; i < b.N; i++ {
-				_ = createBodyFrame(1, body)
+				_ = createBodyFrame(1, 0, body)
 			}
 		})
 	}
