@@ -43,6 +43,8 @@ go test ./tests/e2e/
 
 The e2e suite starts its broker on `localhost:5672`. If something already listens there, like a local RabbitMQ or another OtterMQ, the tests silently use it instead (#257), so stop it first.
 
+Before opening a pull request, run `make test-race`. It runs the unit and e2e tests with the race detector, as CI does, and CI fails on any race report.
+
 Please add a test for every bug fix, and check that it fails without your fix. Pure parsing and encoding bugs are easiest to cover with a table-driven unit test next to the code (see `internal/core/amqp/decode_test.go`). Protocol behaviour is clearest as an e2e test in `tests/e2e/`.
 
 ## Working on the management UI

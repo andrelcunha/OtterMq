@@ -34,6 +34,11 @@ run: build
 test:
 	@go test ./... -v
 
+# Same packages and flags as the CI race jobs (.github/workflows/go.yml).
+test-race:
+	@go test -race ./internal/... ./pkg/... ./web/... ./config/... ./cmd/...
+	@go test -race ./tests/e2e/
+
 test-cli:
 	@go test ./cmd/ottermqadmin ./internal/cli ./pkg/adminapi/client -v
 
@@ -63,4 +68,4 @@ clean:
 	@rm -rf ./ui
 	@rm -rf ./$(UI_DIR)/build
 
-.PHONY: build build-admin install install-admin clean run docs test test-cli lint ui-deps ui-build build-all run-dev
+.PHONY: build build-admin install install-admin clean run docs test test-race test-cli lint ui-deps ui-build build-all run-dev
