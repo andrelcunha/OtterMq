@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is being cancelled, and cancelling a consumer no longer waits for a delivery in flight. Each
   queue now keeps one delivery goroutine for its whole life, which waits for consumers instead
   of exiting when the last one leaves (#218).
+- Cancelling a consumer, closing its channel or disconnecting no longer deadlocks the vhost when
+  the consumer's unacked messages go back to a queue with `x-max-length` and a dead-letter
+  exchange. The messages were requeued while the vhost lock was held, and the requeue
+  dead-lettered an evicted message, which takes that lock again. Requeues and publishes to
+  queues now happen after the lock is released (#215).
 
 ## [v0.21.1]
 

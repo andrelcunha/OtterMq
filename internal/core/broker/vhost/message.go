@@ -125,26 +125,42 @@ func convertToPersistedProperties(amqpProps amqp.BasicProperties) persistence.Me
 }
 
 // Publish publishes a message to the specified exchange with the given routing key.
+// It routes and persists under vh.mu, then pushes to the target queues after
+// releasing it: Push can enforce x-max-length and dead-letter the evicted
+// messages, which publishes again.
 func (vh *VHost) Publish(exchangeName, routingKey string, msg *Message) (string, error) {
 	vh.mu.Lock()
-	defer vh.mu.Unlock()
-	return vh.publishUnlocked(exchangeName, routingKey, msg)
+	exchange, targetQueues, err := vh.routeLocked(exchangeName, routingKey, msg)
+	vh.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+
+	for _, queue := range targetQueues {
+		queue.Push(*msg)
+		if vh.collector != nil {
+			vh.collector.RecordQueuePublish(queue.Name)
+			vh.collector.RecordExchangeDelivery(exchange.Name) // Messages delivered (routed)
+		}
+	}
+	return msg.ID, nil
 }
 
-// publishUnlocked performs message publishing without acquiring vh.mu
-// MUST be called with vh.mu already locked
-func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) (string, error) {
+// routeLocked resolves the exchange and the queues msg is routed to, and
+// persists msg for the durable ones. The caller holds vh.mu and pushes msg
+// to the returned queues after releasing it.
+func (vh *VHost) routeLocked(exchangeName, routingKey string, msg *Message) (*Exchange, []*Queue, error) {
 	exchangeName = resolveExchangeAlias(exchangeName)
 	exchange, ok := vh.Exchanges[exchangeName]
 	if !ok {
 		log.Error().Str("exchange", exchangeName).Msg("Exchange not found")
-		return "", errors.NewChannelError(fmt.Sprintf("no exchange '%s' in vhost '%s'", exchangeName, vh.Name), uint16(amqp.NOT_FOUND), uint16(amqp.BASIC), uint16(amqp.BASIC_PUBLISH))
+		return nil, nil, errors.NewChannelError(fmt.Sprintf("no exchange '%s' in vhost '%s'", exchangeName, vh.Name), uint16(amqp.NOT_FOUND), uint16(amqp.BASIC), uint16(amqp.BASIC_PUBLISH))
 	}
 
 	// verify if exchange is internal
 	if exchange.Props.Internal {
 		// TODO: raise channel exception (403)
-		return "", fmt.Errorf("cannot publish to internal exchange %s", exchangeName)
+		return nil, nil, fmt.Errorf("cannot publish to internal exchange %s", exchangeName)
 	}
 
 	log.Trace().Str("id", msg.ID).Str("exchange", exchangeName).Str("routing_key", routingKey).Str("body", string(msg.Body)).Interface("properties", msg.Properties).Msg("Publishing message")
@@ -159,7 +175,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 		bindings, ok := exchange.Bindings[routingKey]
 		if !ok {
 			log.Error().Str("routing_key", routingKey).Str("exchange", exchangeName).Msg("Routing key not found for exchange")
-			return "", fmt.Errorf("routing key %s not found for exchange %s", routingKey, exchangeName)
+			return nil, nil, fmt.Errorf("routing key %s not found for exchange %s", routingKey, exchangeName)
 		}
 		for _, binding := range bindings {
 			targetQueues = append(targetQueues, binding.Queue)
@@ -170,7 +186,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 		bindings, ok := exchange.Bindings[routingKey]
 		if !ok {
 			log.Error().Str("routing_key", routingKey).Str("exchange", exchangeName).Msg("Routing key not found for exchange")
-			return "", fmt.Errorf("routing key %s not found for exchange %s", routingKey, exchangeName)
+			return nil, nil, fmt.Errorf("routing key %s not found for exchange %s", routingKey, exchangeName)
 		}
 		for _, binding := range bindings {
 			targetQueues = append(targetQueues, binding.Queue)
@@ -193,7 +209,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 			if vh.collector != nil {
 				vh.collector.RecordExchangePublish(exchange.Name, string(exchange.Typ))
 			}
-			return msg.ID, nil
+			return exchange, nil, nil
 		}
 
 		for queue := range matchedQueues {
@@ -201,7 +217,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 		}
 
 	default:
-		return "", fmt.Errorf("exchange type '%s' not supported yet", exchange.Typ)
+		return nil, nil, fmt.Errorf("exchange type '%s' not supported yet", exchange.Typ)
 	}
 
 	// Persist messages while still holding the lock (needs queue metadata)
@@ -215,7 +231,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 			MsgProps:   msgProps,
 		})
 		if err != nil {
-			return "", err
+			return nil, nil, err
 		}
 	}
 
@@ -224,33 +240,7 @@ func (vh *VHost) publishUnlocked(exchangeName, routingKey string, msg *Message) 
 		vh.collector.RecordExchangePublish(exchange.Name, string(exchange.Typ))
 	}
 
-	// Release lock BEFORE calling queue.Push() to avoid deadlock during QLL enforcement
-	vh.mu.Unlock()
-
-	// If anything panics between the manual Unlock above and the manual Lock below,
-	// the caller's deferred vh.mu.Unlock() would fire on an already-unlocked mutex.
-	// Re-acquire the lock before re-panicking so the caller's defer stays consistent.
-	defer func() {
-		if r := recover(); r != nil {
-			vh.mu.Lock()
-			panic(r)
-		}
-	}()
-
-	// Push messages to queues without holding vh.mu
-	// This allows EnforceMaxLength -> handleDeadLetter -> DeadLetter.Publish to work
-	for _, queue := range targetQueues {
-		queue.Push(*msg)
-		if vh.collector != nil {
-			vh.collector.RecordQueuePublish(queue.Name)
-			vh.collector.RecordExchangeDelivery(exchange.Name) // Messages delivered (routed)
-		}
-	}
-
-	// Re-acquire lock before returning (caller expects lock to still be held due to defer)
-	vh.mu.Lock()
-
-	return msg.ID, nil
+	return exchange, targetQueues, nil
 }
 
 // func (vh *Broker) GetMessage(queueName string) <-chan Message {
