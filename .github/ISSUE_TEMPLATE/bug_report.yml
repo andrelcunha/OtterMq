@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in OtterMQ doesn't work as expected
+labels: ["bug"]
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! **For security vulnerabilities, please don't open a public issue.** Use the Security tab ("Report a vulnerability") instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps that show the problem. Client code, commands or a failing test are ideal.
+      placeholder: |
+        1. Start the broker with ...
+        2. With amqp091-go, declare a queue ...
+        3. Publish ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OtterMQ version
+      description: "`git describe --tags`, the release, or the Docker image tag"
+      placeholder: v0.20.0
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client library and version
+      placeholder: amqp091-go v1.10.0, pika 1.3.2, RabbitMQ.Client 7.0 ...
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - AMQP protocol / broker behaviour
+        - Persistence / restart
+        - Management web API
+        - Management UI
+        - ottermqadmin CLI
+        - Docker / packaging
+        - Metrics / Prometheus
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant broker output (`LOG_LEVEL=debug` helps). Remove passwords and tokens first.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Root-cause ideas, a suggested fix, or related issues are very welcome.
