@@ -48,9 +48,12 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 		return nil, err
 	}
 
+	// Until tune-ok, frames are limited by the server's own frame-max.
+	frameMax := cfg.Tuning.FrameMax
+
 	/** R connection.start-ok -> W connection.tune **/
 	// read connecion.start-ok frame
-	frame, err := readFrame(conn)
+	frame, err := readHandshakeFrame(conn, frameMax)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +95,7 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	}
 
 	// read connection.tune-ok frame
-	frame, err = readFrame(conn)
+	frame, err = readHandshakeFrame(conn, frameMax)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +123,7 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 		}
 		return nil, err
 	}
+	frameMax = negotiated.FrameMax
 
 	config := &AmqpClientConfig{
 		Username: username,
@@ -138,7 +142,7 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	client.StartHeartbeat()
 
 	// read connection.open frame
-	frame, err = readFrame(conn)
+	frame, err = readHandshakeFrame(conn, frameMax)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +185,17 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	log.Debug().Msg("Handshake Completed")
 
 	return connInfo, nil
+}
+
+// readHandshakeFrame reads a frame during the handshake. A frame larger than
+// frameMax gets connection.close 501 FRAME_ERROR before the error is returned.
+func readHandshakeFrame(conn net.Conn, frameMax uint32) ([]byte, error) {
+	frame, err := readFrame(conn, frameMax)
+	var tooLarge *FrameTooLargeError
+	if errors.As(err, &tooLarge) {
+		sendHandshakeClose(conn, FRAME_ERROR, 0, tooLarge.Error())
+	}
+	return frame, err
 }
 
 // sendHandshakeClose sends connection.close during the handshake. The caller
@@ -270,7 +285,22 @@ func readProtocolHeader(conn net.Conn) ([]byte, error) {
 	return header, nil
 }
 
-func readFrame(conn net.Conn) ([]byte, error) {
+// FrameTooLargeError is returned by readFrame when a frame header declares a
+// frame larger than frame-max. The caller must close the connection with 501
+// FRAME_ERROR.
+type FrameTooLargeError struct {
+	PayloadSize uint32
+	FrameMax    uint32
+}
+
+func (e *FrameTooLargeError) Error() string {
+	return fmt.Sprintf("frame of %d octets exceeds frame_max=%d",
+		uint64(e.PayloadSize)+FRAME_OVERHEAD, e.FrameMax)
+}
+
+// readFrame reads one frame. frameMax is the largest frame allowed (header and
+// frame-end included); a larger declared size is rejected before allocating.
+func readFrame(conn net.Conn, frameMax uint32) ([]byte, error) {
 	// all frames starts with a 7-octet header
 	frameHeader := make([]byte, 7)
 	_, err := io.ReadFull(conn, frameHeader)
@@ -286,6 +316,9 @@ func readFrame(conn net.Conn) ([]byte, error) {
 
 	// 4th to 7th octets (long) are the size of the payload
 	payloadSize := binary.BigEndian.Uint32(frameHeader[3:])
+	if uint64(payloadSize)+FRAME_OVERHEAD > uint64(frameMax) {
+		return nil, &FrameTooLargeError{PayloadSize: payloadSize, FrameMax: frameMax}
+	}
 
 	// read the framePayload
 	framePayload := make([]byte, payloadSize)

@@ -6,7 +6,7 @@ import (
 )
 
 type Framer interface {
-	ReadFrame(conn net.Conn) ([]byte, error)
+	ReadFrame(conn net.Conn, frameMax uint32) ([]byte, error)
 	SendFrame(conn net.Conn, frame []byte) error
 	Handshake(cfg HandshakeConfig, conn net.Conn, connCtxt context.Context) (*ConnectionInfo, error)
 	ParseFrame(frame []byte) (any, error)
@@ -61,8 +61,8 @@ type Framer interface {
 
 type DefaultFramer struct{}
 
-func (d *DefaultFramer) ReadFrame(conn net.Conn) ([]byte, error) {
-	return readFrame(conn)
+func (d *DefaultFramer) ReadFrame(conn net.Conn, frameMax uint32) ([]byte, error) {
+	return readFrame(conn, frameMax)
 }
 
 func (d *DefaultFramer) SendFrame(conn net.Conn, frame []byte) error {

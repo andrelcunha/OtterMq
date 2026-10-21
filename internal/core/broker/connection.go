@@ -1,6 +1,7 @@
 package broker
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -40,7 +41,18 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 	channelNum := uint16(0)
 
 	for {
-		frame, err := b.framer.ReadFrame(conn)
+		frame, err := b.framer.ReadFrame(conn, client.Negotiated.FrameMax)
+		var tooLarge *amqp.FrameTooLargeError
+		if stderrors.As(err, &tooLarge) {
+			// The rest of the oversized frame is still unread, so the stream
+			// cannot be resynchronised: send connection.close and drop it.
+			log.Warn().Str("client", conn.RemoteAddr().String()).Err(err).Msg("Frame exceeds frame_max")
+			if _, sendErr := b.sendConnectionClosing(conn, 0, uint16(amqp.FRAME_ERROR), 0, 0, err.Error()); sendErr != nil {
+				log.Debug().Err(sendErr).Msg("Failed to send connection.close")
+			}
+			client.CloseConn()
+			return
+		}
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				log.Debug().Err(err).Msg("Connection timeout")

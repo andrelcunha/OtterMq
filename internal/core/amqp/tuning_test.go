@@ -186,3 +186,20 @@ func TestCreateBodyFrameSplitsAtFrameMax(t *testing.T) {
 		})
 	}
 }
+
+// readFrame must reject an oversized declared size from the header alone:
+// the payload is never sent here, so a read of it would fail differently.
+func TestReadFrameRejectsSizeAboveFrameMaxBeforeReading(t *testing.T) {
+	const frameMax = 4096
+	header := []byte{byte(TYPE_BODY), 0, 1}
+	header = binary.BigEndian.AppendUint32(header, 2*frameMax) // 2 x frame-max
+
+	_, err := readFrame(newMockConn(header), frameMax)
+	var tooLarge *FrameTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("readFrame returned %v, want *FrameTooLargeError", err)
+	}
+	if tooLarge.PayloadSize != 2*frameMax || tooLarge.FrameMax != frameMax {
+		t.Errorf("error = %+v, want payload %d and frame-max %d", tooLarge, 2*frameMax, frameMax)
+	}
+}

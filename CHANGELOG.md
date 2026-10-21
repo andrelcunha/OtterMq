@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Message bodies sent to clients (deliveries, `basic.get-ok`, `basic.return`) are split into body
   frames that fit the negotiated frame-max; before, a body of any size went out as one frame.
   `OTTERMQ_FRAME_MAX=0` now means 131072, and values below 4096 are raised to 4096 (#198).
+- A frame whose header declares more than the negotiated frame-max (the configured
+  `OTTERMQ_FRAME_MAX` during the handshake) now closes the connection with 501 `FRAME_ERROR`
+  before the payload is read. Before, the broker allocated whatever size the header declared, so
+  a single 7-byte header could make it allocate up to 4 GiB, even before authentication (#179).
 
 ## [v0.20.0]
 
