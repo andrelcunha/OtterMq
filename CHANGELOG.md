@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame-max and channel-max negotiation no longer caps a value above 32767 (or 2147483647 for
   32-bit fields) when the other side has no preference. No current code path hit this (#184,
   #280 — thanks @kragent66-glitch).
+- A field table with a truncated 64-bit signed integer (`L`) field is now rejected with an error.
+  Before, `DecodeTable` returned an empty table and no error (#182, #287 — thanks
+  @slopggobblercobbler81).
 
 ## [v0.20.0]
 
