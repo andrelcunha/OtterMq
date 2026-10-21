@@ -133,7 +133,7 @@ func TestBasicConsumeHandler_ValidConsumer(t *testing.T) {
 		if consumer.Channel != 1 {
 			t.Errorf("Expected channel 1, got %d", consumer.Channel)
 		}
-		if !consumer.Active {
+		if !consumer.Active.Load() {
 			t.Error("Consumer should be active")
 		}
 	}

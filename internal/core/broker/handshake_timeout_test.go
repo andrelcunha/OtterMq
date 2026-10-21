@@ -39,15 +39,15 @@ func TestHandshakeTimeoutClosesSocket(t *testing.T) {
 	}
 }
 
-// Kept under one second on purpose: the broker's heartbeat monitor first runs
-// a second after the handshake, and its unsynchronised LastHeartbeat read
-// (#217) would turn the run red under -race.
+// Runs past the heartbeat monitor's first tick (one second after the
+// handshake), so the frames sent by roundTrip also exercise the monitor's
+// LastHeartbeat read against the reader's update under -race.
 func TestHandshakeTimeoutIsClearedAfterOpen(t *testing.T) {
 	_, _, addr := startTestBroker(t, func(c *config.Config) {
 		c.HandshakeTimeout = 100 * time.Millisecond
 	}, nil)
 
 	conn, _ := dialTap(t, addr, testHeartbeat)
-	time.Sleep(400 * time.Millisecond) // well past the handshake timeout
+	time.Sleep(1200 * time.Millisecond) // well past the handshake timeout
 	roundTrip(t, conn)
 }

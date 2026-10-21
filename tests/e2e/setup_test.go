@@ -16,6 +16,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -97,12 +98,14 @@ func setupBroker() error {
 	persistdb.InitDB()
 	persistdb.AddDefaultRoles()
 	persistdb.AddDefaultPermissions()
-	user := persistdb.UserCreateDTO{
-		Username: cfg.Username,
-		Password: cfg.Password,
-		RoleID:   1,
+	// The test user gets the minimum bcrypt cost: every connection checks
+	// the password, and the production cost takes seconds per check under
+	// -race. Production hashing (persistdb.AddUser) is unchanged.
+	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.MinCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash test password: %w", err)
 	}
-	if err := persistdb.AddUser(user); err != nil {
+	if err := persistdb.AddUserWithHash(cfg.Username, string(hash), 1); err != nil {
 		return fmt.Errorf("failed to add test user: %w", err)
 	}
 	if err := persistdb.GrantVHostAccess(cfg.Username, "/"); err != nil {

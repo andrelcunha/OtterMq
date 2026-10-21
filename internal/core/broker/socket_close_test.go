@@ -63,7 +63,7 @@ func TestQuietClientIsNotDroppedAfterOpen(t *testing.T) {
 	b, _, addr := startTestBroker(t, nil, nil)
 
 	// Heartbeat 10 s: amqp091 sends nothing for the next 5 s.
-	_, tc := dialTap(t, addr, testHeartbeat)
+	conn, tc := dialTap(t, addr, testHeartbeat)
 	time.Sleep(1500 * time.Millisecond)
 
 	if n := connectionCount(b); n != 1 {
@@ -74,13 +74,9 @@ func TestQuietClientIsNotDroppedAfterOpen(t *testing.T) {
 		t.Fatalf("socket ended with %v after 1.5 s of silence", err)
 	default:
 	}
-	// Keep amqp091's connection.close at cleanup from reaching the broker: a
-	// frame arriving now races with the heartbeat monitor's unsynchronised
-	// LastHeartbeat read (#217).
-	tc.mute.Store(true)
-	// Runs before dialTap's cleanup, so amqp091's Close does not wait for a
-	// close-ok that can no longer arrive.
-	t.Cleanup(func() { tc.Conn.Close() })
+	// A frame arriving now updates LastHeartbeat while the heartbeat monitor
+	// reads it.
+	roundTrip(t, conn)
 }
 
 func TestCleanupConnectionClosesSocketOnce(t *testing.T) {

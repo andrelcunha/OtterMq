@@ -3,6 +3,7 @@ package vhost
 import (
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -37,7 +38,7 @@ type Consumer struct {
 	Channel       uint16
 	QueueName     string
 	ConnectionID  ConnectionID
-	Active        bool
+	Active        atomic.Bool
 	PrefetchCount uint16 // 0 means unlimited
 	Props         *ConsumerProperties
 
@@ -147,7 +148,7 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 	}
 
 	// Activate consumer and register
-	consumer.Active = true
+	consumer.Active.Store(true)
 	vh.Consumers[key] = consumer
 
 	// Index for delivery
@@ -198,7 +199,7 @@ func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
 		)
 	}
 
-	consumer.Active = false
+	consumer.Active.Store(false)
 	delete(vh.Consumers, key)
 
 	// Requeue unacked messages for this consumer
@@ -452,7 +453,7 @@ func (vh *VHost) GetActiveConsumersForQueue(queueName string) []*Consumer {
 	// Filter only active consumers
 	activeConsumers := make([]*Consumer, 0, len(consumers))
 	for _, consumer := range consumers {
-		if consumer.Active {
+		if consumer.Active.Load() {
 			activeConsumers = append(activeConsumers, consumer)
 		}
 	}

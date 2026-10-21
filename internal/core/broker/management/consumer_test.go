@@ -21,7 +21,6 @@ func TestListConsumers_MultipleQueues(t *testing.T) {
 			Channel:       1,
 			QueueName:     "queue1",
 			ConnectionID:  vhost.MANAGEMENT_CONNECTION_ID,
-			Active:        true,
 			PrefetchCount: 0,
 			Props: &vhost.ConsumerProperties{
 				NoAck:     false,
@@ -36,7 +35,6 @@ func TestListConsumers_MultipleQueues(t *testing.T) {
 			Channel:       1,
 			QueueName:     "queue2",
 			ConnectionID:  vhost.MANAGEMENT_CONNECTION_ID,
-			Active:        true,
 			PrefetchCount: 0,
 			Props: &vhost.ConsumerProperties{
 				NoAck:     false,
@@ -49,7 +47,6 @@ func TestListConsumers_MultipleQueues(t *testing.T) {
 			Channel:       2,
 			QueueName:     "queue2",
 			ConnectionID:  vhost.MANAGEMENT_CONNECTION_ID,
-			Active:        true,
 			PrefetchCount: 0,
 			Props: &vhost.ConsumerProperties{
 				NoAck:     false,

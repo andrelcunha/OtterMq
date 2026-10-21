@@ -83,7 +83,7 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	if !redelivered {
 		redelivered = vh.ShouldRedeliver(msg.ID)
 	}
-	if !consumer.Active {
+	if !consumer.Active.Load() {
 		return fmt.Errorf("consumer %s on channel %d is not active", consumer.Tag, consumer.Channel)
 	}
 	channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
@@ -209,17 +209,26 @@ func (vh *VHost) shouldThrottle(consumer *Consumer, channelState *ChannelDeliver
 	// b) Prefetch is per-consumer AND total unacked on channel for this consumer >= consumer prefetch AND consumer prefetch > 0
 	// c) Flow is paused on the channel
 
+	// One snapshot: the QoS and flow fields are written under channelState.mu.
+	channelState.mu.Lock()
+	flowActive := channelState.FlowActive
+	prefetchGlobal := channelState.PrefetchGlobal
+	globalPrefetchCount := channelState.GlobalPrefetchCount
+	unackedChannel := len(channelState.UnackedByTag)
+	unackedConsumer := len(channelState.UnackedByConsumer[consumer.Tag])
+	channelState.mu.Unlock()
+
 	reason := []struct {
 		name      string
 		condition bool
 	}{
-		{"flow paused", !channelState.FlowActive},
-		{"global qos", channelState.PrefetchGlobal &&
-			channelState.GlobalPrefetchCount > 0 &&
-			vh.getUnackedCountChannel(channelState) >= channelState.GlobalPrefetchCount},
-		{"consumer_qos", !channelState.PrefetchGlobal &&
+		{"flow paused", !flowActive},
+		{"global qos", prefetchGlobal &&
+			globalPrefetchCount > 0 &&
+			unackedChannel >= int(globalPrefetchCount)},
+		{"consumer_qos", !prefetchGlobal &&
 			consumer.PrefetchCount > 0 &&
-			vh.getUnackedCountConsumer(channelState, consumer) >= consumer.PrefetchCount},
+			unackedConsumer >= int(consumer.PrefetchCount)},
 	}
 	for _, r := range reason {
 		if r.condition {
@@ -231,23 +240,6 @@ func (vh *VHost) shouldThrottle(consumer *Consumer, channelState *ChannelDeliver
 		}
 	}
 	return false
-}
-
-func (vh *VHost) getUnackedCountChannel(channelState *ChannelDeliveryState) uint16 {
-	channelState.mu.Lock()
-	unackedCount := len(channelState.UnackedByTag)
-	channelState.mu.Unlock()
-	return uint16(unackedCount)
-}
-
-func (vh *VHost) getUnackedCountConsumer(channelState *ChannelDeliveryState, consumer *Consumer) uint16 {
-	channelState.mu.Lock()
-	defer channelState.mu.Unlock()
-	consumerMap, exists := channelState.UnackedByConsumer[consumer.Tag]
-	if !exists {
-		return 0
-	}
-	return uint16(len(consumerMap))
 }
 
 func (vh *VHost) getChannelDeliveryState(connectionID ConnectionID, channel uint16) *ChannelDeliveryState {

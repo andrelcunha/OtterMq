@@ -209,6 +209,10 @@ func (vh *VHost) HandleBasicQos(connID ConnectionID, channel uint16, prefetchCou
 		}
 		vh.ChannelDeliveries[key] = state
 	}
+	// The delivery loop reads these under state.mu only (shouldThrottle).
+	// Lock order: vh.mu -> state.mu.
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	if global {
 		state.GlobalPrefetchCount = prefetchCount
 		state.PrefetchGlobal = true

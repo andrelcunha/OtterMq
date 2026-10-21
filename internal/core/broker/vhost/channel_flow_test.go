@@ -159,12 +159,12 @@ func TestShouldThrottle_FlowPaused(t *testing.T) {
 		Channel:      channel,
 		QueueName:    "test-queue",
 		ConnectionID: connID,
-		Active:       true,
 		Props: &ConsumerProperties{
 			NoAck: false,
 		},
 		PrefetchCount: 0, // No QoS limit
 	}
+	consumer.Active.Store(true)
 
 	// Get channel state and pause flow
 	channelKey := ConnectionChannelKey{connID, channel}
@@ -201,10 +201,10 @@ func TestShouldThrottle_FlowAndQoS(t *testing.T) {
 		Channel:       channel,
 		QueueName:     "test-queue",
 		ConnectionID:  connID,
-		Active:        true,
 		Props:         &ConsumerProperties{NoAck: false},
 		PrefetchCount: 5, // QoS limit
 	}
+	consumer.Active.Store(true)
 
 	channelKey := ConnectionChannelKey{connID, channel}
 	channelState := vh.GetOrCreateChannelDelivery(channelKey)
@@ -358,9 +358,9 @@ func TestShouldThrottle_NilChannelState(t *testing.T) {
 		Channel:      1,
 		QueueName:    "test-queue",
 		ConnectionID: connID,
-		Active:       true,
 		Props:        &ConsumerProperties{NoAck: false},
 	}
+	consumer.Active.Store(true)
 
 	// Should not throttle with nil channel state (no QoS, flow defaults to active)
 	if vh.shouldThrottle(consumer, nil) {

@@ -12,14 +12,16 @@ import (
 )
 
 type AmqpClient struct {
-	RemoteAddr    string
-	ConnectedAt   time.Time
-	LastHeartbeat time.Time
-	Conn          net.Conn
-	Ctx           context.Context
-	Cancel        context.CancelFunc
-	Config        *AmqpClientConfig
+	RemoteAddr  string
+	ConnectedAt time.Time
+	Conn        net.Conn
+	Ctx         context.Context
+	Cancel      context.CancelFunc
+	Config      *AmqpClientConfig
 
+	// UnixNano of the last inbound frame. Written by the reader goroutine,
+	// read by the heartbeat monitor and the management API.
+	lastHeartbeat  atomic.Int64
 	recoveredPanic atomic.Bool
 	closeOnce      sync.Once
 }
@@ -38,13 +40,13 @@ func NewAmqpClient(conn net.Conn, config *AmqpClientConfig, connCtx context.Cont
 	client := &AmqpClient{
 		RemoteAddr:  conn.RemoteAddr().String(),
 		ConnectedAt: time.Now(),
-		// Silence is measured from the handshake until the first frame.
-		LastHeartbeat: time.Now(),
-		Conn:          conn,
-		Ctx:           connCtx,
-		Cancel:        cancel,
-		Config:        config,
+		Conn:        conn,
+		Ctx:         connCtx,
+		Cancel:      cancel,
+		Config:      config,
 	}
+	// Silence is measured from the handshake until the first frame.
+	client.TouchHeartbeat()
 
 	return client
 }
@@ -110,6 +112,17 @@ func NewConnectionInfo(vhostName string) *ConnectionInfo {
 		Channels:  make(map[uint16]*ChannelState),
 		cleanup:   &cleanupSignal{done: make(chan struct{})},
 	}
+}
+
+// LastHeartbeat returns when the client last sent a frame.
+func (c *AmqpClient) LastHeartbeat() time.Time {
+	return time.Unix(0, c.lastHeartbeat.Load())
+}
+
+// TouchHeartbeat records that the client sent a frame now. Safe to call from
+// any goroutine.
+func (c *AmqpClient) TouchHeartbeat() {
+	c.lastHeartbeat.Store(time.Now().UnixNano())
 }
 
 func (c *AmqpClient) StartHeartbeat() {
@@ -181,7 +194,7 @@ func (c *AmqpClient) monitorHeartbeatTimeout() {
 		select {
 		case <-ticker.C:
 			maxInterval := time.Duration(c.Config.HeartbeatInterval<<1) * time.Second
-			if time.Since(c.LastHeartbeat) > maxInterval {
+			if time.Since(c.LastHeartbeat()) > maxInterval {
 				log.Warn().Str("addr", c.RemoteAddr).Msg("Heartbeat timeout")
 				// Spec 4.2.7: close the socket without a close handshake.
 				// Cleanup follows via monitorConnectionLifecycle.
