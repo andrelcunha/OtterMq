@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   socket and its reader goroutine stayed open and the client kept publishing into the void. A
   client that sends nothing during its first second after `connection.open-ok` is no longer
   treated as a missed heartbeat (part of #199).
+- `basic.ack`, `basic.nack` and `basic.reject` with a delivery tag the channel doesn't have
+  outstanding (never delivered, already acked, or a double ack) now close the channel with 406
+  `PRECONDITION_FAILED`, as RabbitMQ does. Before, the ack was silently ignored, or, on a channel
+  with no deliveries yet, the whole connection was closed with 541. `multiple=true` with
+  delivery tag 0 now acknowledges all outstanding deliveries (#226, #281 — thanks
+  @kragent66-glitch).
+- Frame-max and channel-max negotiation no longer caps a value above 32767 (or 2147483647 for
+  32-bit fields) when the other side has no preference. No current code path hit this (#184,
+  #280 — thanks @kragent66-glitch).
 
 ## [v0.20.0]
 
