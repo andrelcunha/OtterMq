@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same durable queue, or two binds to one exchange) no longer interleave and corrupt its JSON
   file or lose updates. The JSON store now locks each file across every load-modify-save, and the
   `Persistence` interface documents that implementations must be safe for concurrent use (#236).
+- JSON persistence writes are now crash-safe. Each write goes to `<name>.json.tmp`, is fsynced,
+  then renamed over the live file, and the directory is fsynced, so a crash or power loss leaves
+  either the old or the new file, never a truncated one. Stray `.tmp` files are removed at startup.
+  Every write is fsynced, so publishing persistent messages to a durable queue is slower on disks
+  with expensive fsync (#238).
 - AMQP field tables, arrays and strings that declare more bytes than the frame carries are now
   rejected instead of being accepted with the missing bytes zero-padded. An empty string as the
   last field of a table is no longer rejected (#197, #273 — thanks @tnalbant).

@@ -52,10 +52,11 @@ func equalArgs(a, b map[string]any) bool {
 
 func (jp *JsonPersistence) Initialize() error {
 	// Create the base data directory if it doesn't exist
-	if err := os.MkdirAll(jp.dataDir, 0755); err != nil {
+	if err := mkdirAllDurable(jp.dataDir, 0755); err != nil {
 		return err
 	}
-	return nil
+	// Discard writes a crash interrupted before their rename
+	return removeStrayTempFiles(filepath.Join(jp.dataDir, "vhosts"))
 }
 
 func (jp *JsonPersistence) Close() error {
@@ -89,7 +90,7 @@ func (jp *JsonPersistence) queueFile(vhost, name string) string {
 func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string, props persistence.ExchangeProperties) error {
 	safeName := safeVHostName(vhost)
 	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := mkdirAllDurable(dir, 0755); err != nil {
 		return err
 	}
 
@@ -104,7 +105,7 @@ func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, data, 0644)
+	return atomicWriteFile(file, data, 0644)
 }
 
 // LoadExchangeMetadata loads exchange metadata from a JSON file (type and properties)
@@ -133,7 +134,7 @@ func (jp *JsonPersistence) DeleteExchangeMetadata(vhost, name string) error {
 func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persistence.QueueProperties) error {
 	safeName := safeVHostName(vhost)
 	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "queues")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := mkdirAllDurable(dir, 0755); err != nil {
 		return err
 	}
 
@@ -161,7 +162,7 @@ func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persisten
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, data, 0644)
+	return atomicWriteFile(file, data, 0644)
 }
 
 // LoadQueueMetadata loads a single queue's metadata from a JSON file (props)
@@ -211,14 +212,14 @@ func (jp *JsonPersistence) SaveBindingState(vhost, exchange, queue, routingKey s
 	}
 
 	// Ensure directory exists before writing
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+	if err := mkdirAllDurable(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, data, 0644)
+	return atomicWriteFile(file, data, 0644)
 }
 
 func (jp *JsonPersistence) LoadExchangeBindings(vhost string, exchange string) ([]persistence.BindingData, error) {
@@ -256,14 +257,14 @@ func (jp *JsonPersistence) DeleteBindingState(vhost, exchange, queue, routingKey
 	}
 
 	// Ensure directory exists before writing (in case metadata was never saved)
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+	if err := mkdirAllDurable(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, data, 0644)
+	return atomicWriteFile(file, data, 0644)
 }
 
 func (jp *JsonPersistence) SaveMessage(vhost, queue, msgId string, msgBody []byte, msgProps persistence.MessageProperties) error {
@@ -407,7 +408,7 @@ func (jp *JsonPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnaps
 // SaveVHostMetadata ensures the vhost directory exists on disk.
 func (jp *JsonPersistence) SaveVHostMetadata(name string) error {
 	dir := filepath.Join(jp.dataDir, "vhosts", safeVHostName(name))
-	return os.MkdirAll(dir, 0755)
+	return mkdirAllDurable(dir, 0755)
 }
 
 // DeleteVHostMetadata removes the entire vhost directory tree.
@@ -482,7 +483,7 @@ func (jp *JsonPersistence) lockedLoadExchangeFile(file string) (*JsonExchangeDat
 }
 
 func saveQueueFile(file string, queueData *JsonQueueData) error {
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+	if err := mkdirAllDurable(filepath.Dir(file), 0755); err != nil {
 		return err
 	}
 
@@ -490,7 +491,7 @@ func saveQueueFile(file string, queueData *JsonQueueData) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, data, 0644)
+	return atomicWriteFile(file, data, 0644)
 }
 
 // DeleteQueue removes a single queue JSON file
