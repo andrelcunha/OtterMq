@@ -54,6 +54,11 @@ type Broker struct {
 
 	// Metrics collector
 	collector metrics.MetricsCollector
+
+	// After a recovered connection panic, how long cleanup may take before
+	// fatalAfterPanic is called. Fields so tests can replace them.
+	panicCleanupTimeout time.Duration
+	fatalAfterPanic     func(msg string)
 }
 
 func NewBroker(config *config.Config, rootCtx context.Context, rootCancel context.CancelFunc, collector metrics.MetricsCollector) *Broker {
@@ -80,6 +85,9 @@ func NewBroker(config *config.Config, rootCtx context.Context, rootCancel contex
 		Ready:       make(chan struct{}),
 		startedAt:   time.Now(),
 		collector:   collector,
+
+		panicCleanupTimeout: defaultPanicCleanupTimeout,
+		fatalAfterPanic:     fatalAfterPanic,
 	}
 	options := vhost.VHostOptions{
 		QueueBufferSize: config.QueueBufferSize,
@@ -212,7 +220,7 @@ func (b *Broker) acceptLoop(configurations map[string]any) error {
 		}
 		log.Debug().Str("client", conn.RemoteAddr().String()).Msg("New client waiting for connection")
 		connCtx, connCancel := context.WithCancel(b.rootCtx)
-		connInfo, err := b.framer.Handshake(&configurations, conn, connCtx)
+		connInfo, err := b.handshakeGuarded(&configurations, conn, connCtx)
 		if err != nil {
 			connCancel()
 			log.Info().Err(err).Msg("Handshake failed")
@@ -228,6 +236,9 @@ func (b *Broker) acceptLoop(configurations map[string]any) error {
 func (b *Broker) monitorConnectionLifecycle(conn net.Conn, client *amqp.AmqpClient, cancel context.CancelFunc) {
 	defer cancel()
 	<-client.Ctx.Done()
+	if client.RecoveredPanic() {
+		b.collector.RecordConnectionPanic()
+	}
 	log.Info().Str("client", conn.RemoteAddr().String()).Msg("Connection closed")
 	b.cleanupConnection(conn)
 }

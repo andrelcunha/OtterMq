@@ -48,6 +48,7 @@ The OtterMQ dashboard loads automatically — no manual import needed.
 | `ottermq_messages_delivered_total` | Counter | Total messages delivered |
 | `ottermq_messages_acked_total` | Counter | Total messages acknowledged |
 | `ottermq_messages_nacked_total` | Counter | Total messages not acknowledged |
+| `ottermq_connection_panics_total` | Counter | Panics recovered while serving a connection (each one closed that connection) |
 | `ottermq_messages_publish_rate` | Gauge | Publish rate (msg/s) |
 | `ottermq_messages_deliver_rate` | Gauge | Deliver rate (msg/s) |
 | `ottermq_message_count` | Gauge | Total ready messages in broker |

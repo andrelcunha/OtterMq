@@ -622,6 +622,22 @@ func TestBrokerLevelConnectionMetrics(t *testing.T) {
 	}
 }
 
+func TestBrokerLevelConnectionPanicMetrics(t *testing.T) {
+	c := NewCollector(nil, context.Background())
+
+	c.RecordConnectionPanic()
+	c.RecordConnectionPanic()
+
+	if got := c.GetBrokerSnapshot().ConnectionPanicsTotal; got != 2 {
+		t.Errorf("ConnectionPanicsTotal = %d, want 2", got)
+	}
+
+	c.Clear()
+	if got := c.GetBrokerSnapshot().ConnectionPanicsTotal; got != 0 {
+		t.Errorf("ConnectionPanicsTotal after Clear = %d, want 0", got)
+	}
+}
+
 func TestBrokerLevelChannelMetrics(t *testing.T) {
 	ctx := context.Background()
 	c := NewCollector(nil, ctx)

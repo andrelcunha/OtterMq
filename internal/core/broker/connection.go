@@ -30,6 +30,13 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 		log.Debug().Msg("Cleaning connection")
 		b.cleanupConnection(conn)
 	}()
+	// Registered last so it runs first: the cleanup above must not run while
+	// a lock left held by the panic could block it.
+	defer func() {
+		if r := recover(); r != nil {
+			b.handleConnectionPanic(conn, connInfo, "frame loop", r)
+		}
+	}()
 
 	channelNum := uint16(0)
 
@@ -167,6 +174,7 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 	}
 
 	b.collector.RecordConnectionClose()
+	connInfo.MarkCleanedUp()
 }
 
 // closeConnectionRequested closes a connection and sends a CONNECTION_CLOSE_OK frame

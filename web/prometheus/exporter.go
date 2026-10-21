@@ -19,6 +19,8 @@ type Exporter struct {
 	ackedTotal     prometheus.Counter
 	nackedTotal    prometheus.Counter
 
+	connectionPanicsTotal prometheus.Counter
+
 	// Broker-wide gauges (current state)
 	publishedRate   prometheus.Gauge
 	deliveredRate   prometheus.Gauge
@@ -46,6 +48,8 @@ type Exporter struct {
 	lastDelivered int64
 	lastAcked     int64
 	lastNacked    int64
+
+	lastConnectionPanics int64
 
 	// Delta tracking for per-exchange counters (keyed by exchange name)
 	lastExchangePublished map[string]int64
@@ -87,6 +91,10 @@ func (e *Exporter) registerMetrics() {
 	e.nackedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "ottermq_messages_nacked_total",
 		Help: "Total number of messages not acknowledged",
+	})
+	e.connectionPanicsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "ottermq_connection_panics_total",
+		Help: "Total number of panics recovered in connection goroutines",
 	})
 
 	// Broker-wide gauges
@@ -228,6 +236,10 @@ func (e *Exporter) updateBroker() {
 	if delta := snapshot.NackedTotal - e.lastNacked; delta > 0 {
 		e.nackedTotal.Add(float64(delta))
 		e.lastNacked = snapshot.NackedTotal
+	}
+	if delta := snapshot.ConnectionPanicsTotal - e.lastConnectionPanics; delta > 0 {
+		e.connectionPanicsTotal.Add(float64(delta))
+		e.lastConnectionPanics = snapshot.ConnectionPanicsTotal
 	}
 }
 
