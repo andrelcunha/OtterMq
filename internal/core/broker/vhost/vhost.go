@@ -4,12 +4,12 @@ import (
 	"context"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/models"
 	"github.com/ottermq/ottermq/internal/persistdb"
 	"github.com/ottermq/ottermq/pkg/metrics"
 	"github.com/ottermq/ottermq/pkg/persistence"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -75,6 +75,9 @@ type VHostOptions struct {
 	EnableDLX       bool
 	EnableTTL       bool
 	EnableQLL       bool
+	// Collector receives metrics, including those recorded while recovering
+	// persisted state in NewVhost. Nil means a no-op collector.
+	Collector metrics.MetricsCollector
 }
 
 func NewVhost(vhostName string, options VHostOptions) *VHost {
@@ -96,6 +99,10 @@ func NewVhost(vhostName string, options VHostOptions) *VHost {
 		redeliveredMessages: make(map[string]struct{}),
 		ChannelTransactions: make(map[ConnectionChannelKey]*ChannelTransactionState),
 		ActiveExtensions:    make(map[string]bool),
+		collector:           options.Collector,
+	}
+	if vh.collector == nil {
+		vh.collector = metrics.NewMockCollector(nil)
 	}
 	vh.createMandatoryStructure()
 	// Load persisted state
@@ -114,6 +121,9 @@ func (vh *VHost) GetCollector() metrics.MetricsCollector {
 }
 
 func (vh *VHost) SetMetricsCollector(collector metrics.MetricsCollector) {
+	if collector == nil {
+		collector = metrics.NewMockCollector(nil)
+	}
 	vh.mu.Lock()
 	defer vh.mu.Unlock()
 	vh.collector = collector
