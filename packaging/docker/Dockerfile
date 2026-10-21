@@ -28,15 +28,18 @@ RUN make docs
 # Build the Go app using the Makefile
 RUN make build
 
-# ####################################################################
-# FROM node:alpine AS node-builder
+####################################################################
+# Stage 2: Management UI (SvelteKit static build from web/ui)
+FROM node:22-alpine AS node-builder
 
-# WORKDIR /ui
+WORKDIR /ui
 
-# # copy the UI source code (SvelteKit, web/ui) into the container
-# COPY web/ui ./
-# RUN npm ci
-# RUN npm run build
+# Install dependencies first so they're cached until package*.json change
+COPY web/ui/package.json web/ui/package-lock.json ./
+RUN npm ci
+
+COPY web/ui ./
+RUN npm run build
 
 ####################################################################
 # Stage 3: Final Stage
@@ -47,7 +50,8 @@ WORKDIR /app
 
 # Copy the built binaries from the builder stage
 COPY --from=go-builder /app/bin/ottermq .
-# COPY --from=node-builder /ui/build ./ui/
+# The broker serves the UI from OTTERMQ_UI_PATH, whose default is this directory
+COPY --from=node-builder /ui/build /usr/local/share/ottermq/ui/
 # Expose ports 3000 for the web admin, 5672 for the broker and 9090 for prometheus exporter
 EXPOSE 3000
 EXPOSE 5672

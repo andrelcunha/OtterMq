@@ -9,22 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.20.0]
+
+> **Not production-ready.** OtterMQ is pre-1.0. Known stop-ship issues (pre-authentication
+> crashes, default admin credentials, path traversal in persistence, deadlocks) are tracked in the
+> [production readiness roadmap](https://github.com/ottermq/ottermq/issues/271). Don't expose
+> the broker or its web API to untrusted networks.
+
+### Added
+
+- **New management UI** built with SvelteKit (`web/ui`), replacing the Vue/Quasar UI. It covers
+  overview charts, connections, channels, queues, exchanges and administration, including
+  creating and deleting queues and exchanges, getting messages, managing bindings, publishing,
+  managing users and vhost permissions, a vhost selector, notifications and confirmations
+  (#274, #275).
+- **Docker images** are published to `ghcr.io/ottermq/ottermq`: `latest` from `main`, and
+  `X.Y.Z` / `X.Y` for each release tag. The image now includes the management UI.
+- **FreeBSD support:** platform-specific system helpers (file descriptors, memory) and an
+  `rc.d` service script in `packaging/freebsd/rc.d`.
+- `make install` / `make install-admin` (honouring `PREFIX`/`BINDIR`).
+- `OTTERMQ_UI_PATH` sets where the broker serves the UI from (default
+  `/usr/local/share/ottermq/ui`).
+
 ### Changed
 
-- The management UI is now the SvelteKit app in `web/ui`, built as a static single-page app
-  (`make ui-build`). The Vue/Quasar UI (`ottermq_ui/`) has been removed. The web server serves
-  `index.html` for client-side routes, so reloading a page such as `/queues` works.
-- The Svelte UI reached feature parity with the old UI: creating and deleting queues and
-  exchanges, getting messages, managing bindings, publishing, managing users and vhost
-  permissions, a vhost selector, notifications and confirmations (#274).
+- The UI is built as a static single-page app with `make ui-build` (output copied to `./ui`).
+  The web server serves `index.html` for client-side routes, so reloading a page such as
+  `/queues` works. The Vue/Quasar UI (`ottermq_ui/`) has been removed.
+- The Docker build pins the `swag` CLI to the version in `go.mod`, and the build context excludes
+  local data, `.env`, binaries and `node_modules`.
 
 ### Fixed
 
 - `queue.unbind` and `DELETE /api/bindings` on a topic exchange returned success without
   removing the binding.
+- A `Connection.Close` frame with an oversized reply-text length no longer panics the parser
+  (#180, #185).
+- After an unroutable `mandatory` publish, the next publish on the same channel reused the
+  previous message's header and body (#187).
+- Declaring an anonymous queue (empty name) hung the client (#188).
 - `GET /api/exchanges` reported every exchange as non-durable, non-auto-delete and non-internal.
 - Admin permission routes stored URL-encoded vhost names (`%2F` instead of `/`).
-- `Connection.Close` frames with an oversized reply-text length no longer panic the parser (#180).
+- Total RAM reported in node statistics was calculated incorrectly.
+- The Docker Image CI workflow failed on every run because it couldn't find the Dockerfile
+  (#256, #276); `docker-compose.yml` also pointed at the wrong Dockerfile path.
 
 ## [v0.19.3-2]
 
