@@ -170,41 +170,37 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 		consumer,
 	)
 	vh.collector.RecordConsumerAdded(consumer.QueueName)
-	// Check if we need to start delivery routine
 	queue := vh.Queues[consumer.QueueName]
-	shouldStartDelivery := len(vh.ConsumersByQueue[queue.Name]) == 1
-
-	// Release the lock BEFORE starting the delivery loop to avoid deadlock
-	// The delivery loop may need to acquire locks on both vh and queue
+	queue.consumers.Store(int32(len(vh.ConsumersByQueue[consumer.QueueName])))
 	vh.mu.Unlock()
 
-	// start delivery routine if not already running
-	if shouldStartDelivery {
-		go queue.startDeliveryLoop(vh)
-	}
+	// The loop is started once and then lives as long as the queue; if it is
+	// already running (possibly idle, with no consumers), wake it up.
+	queue.startDeliveryLoop(vh)
+	queue.notifyConsumersChanged()
 
 	return consumer.Tag, nil
 }
 
 func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
-	return vh.cancelConsumer(channel, tag, true, nil)
+	return vh.cancelConsumer(channel, tag, nil)
 }
 
-// removeFailedConsumer cancels a consumer whose delivery failed. It runs on
-// q's delivery goroutine, so it must not stop (and wait for) that loop. It
-// does nothing if, by the time it holds vh.mu, q was deleted (the name may
-// now belong to a recreated queue) or the consumer's key was reused.
+// removeFailedConsumer cancels a consumer whose delivery failed; it runs on
+// q's delivery goroutine. It does nothing if, by the time it holds vh.mu, q
+// was deleted (the name may now belong to a recreated queue) or the
+// consumer's key was reused.
 func (vh *VHost) removeFailedConsumer(q *Queue, consumer *Consumer) error {
 	key := ConsumerKey{consumer.Channel, consumer.Tag}
-	return vh.cancelConsumer(consumer.Channel, consumer.Tag, false, func() bool {
+	return vh.cancelConsumer(consumer.Channel, consumer.Tag, func() bool {
 		return vh.Queues[q.Name] == q && vh.Consumers[key] == consumer
 	})
 }
 
-// cancelConsumer removes a consumer. With stopLoop, cancelling the queue's
-// last consumer also stops its delivery loop. If guard is set, it is checked
-// with vh.mu held and the cancel is skipped when it returns false.
-func (vh *VHost) cancelConsumer(channel uint16, tag string, stopLoop bool, guard func() bool) error {
+// cancelConsumer removes a consumer. The queue's delivery loop keeps running
+// (it idles without consumers). If guard is set, it is checked with vh.mu
+// held and the cancel is skipped when it returns false.
+func (vh *VHost) cancelConsumer(channel uint16, tag string, guard func() bool) error {
 	key := ConsumerKey{channel, tag}
 	vh.mu.Lock()
 	defer vh.mu.Unlock()
@@ -239,14 +235,10 @@ func (vh *VHost) cancelConsumer(channel uint16, tag string, stopLoop bool, guard
 			break
 		}
 	}
-	if len(vh.ConsumersByQueue[consumer.QueueName]) == 0 {
-		queue, exists := vh.Queues[consumer.QueueName]
-		if exists && stopLoop {
-			vh.mu.Unlock()
-			queue.stopDeliveryLoop()
-			vh.mu.Lock()
-		}
-		if exists {
+	if queue, exists := vh.Queues[consumer.QueueName]; exists {
+		queue.consumers.Store(int32(len(vh.ConsumersByQueue[consumer.QueueName])))
+		queue.notifyConsumersChanged()
+		if len(vh.ConsumersByQueue[consumer.QueueName]) == 0 {
 			// verify if the queue can be auto-deleted
 			if deleted, err := vh.checkAutoDeleteQueueUnlocked(queue.Name); err != nil {
 				log.Printf("Failed to check auto-delete queue: %v", err)

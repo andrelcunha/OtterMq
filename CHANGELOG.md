@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loop was blocked writing to a consumer that had stopped reading, or after a failed delivery
   had removed the queue's last consumer (the loop then waited for itself, and the queue stopped
   delivering for good). Deletion now stops the loop without waiting for it (#214).
+- A queue no longer stops delivering when a consumer subscribes while the queue's last consumer
+  is being cancelled, and cancelling a consumer no longer waits for a delivery in flight. Each
+  queue now keeps one delivery goroutine for its whole life, which waits for consumers instead
+  of exiting when the last one leaves (#218).
 
 ## [v0.21.1]
 

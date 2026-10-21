@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
@@ -41,7 +42,13 @@ type Queue struct {
 	deliveryCancel context.CancelFunc `json:"-"`
 	delivering     bool
 	deliveryWg     sync.WaitGroup `json:"-"` // Tracks delivery loop completion
-	deliveryMu     sync.Mutex     `json:"-"` // Protects delivering flag
+	deliveryMu     sync.Mutex     `json:"-"` // Protects delivering and consumersChanged
+	// consumersChanged wakes the delivery loop when consumers are added or
+	// removed. Created lazily; use consumersSignal.
+	consumersChanged chan struct{}
+	// consumers mirrors len(vh.ConsumersByQueue[Name]); it is stored under
+	// vh.mu and read by the delivery loop without it.
+	consumers atomic.Int32
 
 	/* Extension */
 	maxLength uint32 `json:"-"`
@@ -78,7 +85,32 @@ func (q *Queue) IsPersistenceEnabled() bool {
 		q.vh.persist != nil
 }
 
+// consumersSignal returns the channel that notifyConsumersChanged signals,
+// creating it on first use.
+func (q *Queue) consumersSignal() chan struct{} {
+	q.deliveryMu.Lock()
+	defer q.deliveryMu.Unlock()
+	if q.consumersChanged == nil {
+		q.consumersChanged = make(chan struct{}, 1)
+	}
+	return q.consumersChanged
+}
+
+// notifyConsumersChanged wakes the delivery loop after a consumer of this
+// queue was registered or cancelled. It never blocks.
+func (q *Queue) notifyConsumersChanged() {
+	select {
+	case q.consumersSignal() <- struct{}{}:
+	default: // a wake-up is already pending
+	}
+}
+
+// startDeliveryLoop starts the queue's delivery goroutine if it is not
+// running yet. The goroutine lives until the queue is deleted: when the queue
+// has no consumers it waits for notifyConsumersChanged instead of exiting, so
+// consumers coming and going can never leave the queue without a loop.
 func (q *Queue) startDeliveryLoop(vh *VHost) {
+	consumersChanged := q.consumersSignal()
 	q.deliveryMu.Lock()
 	if q.delivering {
 		q.deliveryMu.Unlock()
@@ -97,29 +129,48 @@ func (q *Queue) startDeliveryLoop(vh *VHost) {
 				log.Debug().Str("queue", q.Name).Msg("Stopping delivery loop")
 				return
 			default:
-				if q.maxPriority > 0 {
-					q.deliverFromPriorityQueue(vh)
-				} else {
-					q.deliverFromFIFOQueue(vh)
+			}
+			// Lock-free on purpose: an idle loop never needs vh.mu.
+			if q.consumers.Load() == 0 {
+				select {
+				case <-q.deliveryCtx.Done():
+				case <-consumersChanged:
 				}
+				continue
+			}
+			if q.maxPriority > 0 {
+				q.deliverFromPriorityQueue(vh, consumersChanged)
+			} else {
+				q.deliverFromFIFOQueue(vh, consumersChanged)
 			}
 		}
 	}()
 }
 
-func (q *Queue) deliverFromPriorityQueue(vh *VHost) {
+// deliverFromPriorityQueue delivers the queued messages, highest priority
+// first. It returns early when consumersChanged fires, so the loop re-checks
+// whether the queue still has consumers before taking a message.
+func (q *Queue) deliverFromPriorityQueue(vh *VHost, consumersChanged <-chan struct{}) {
 	select {
 	case <-q.deliveryCtx.Done():
 		log.Debug().Str("queue", q.Name).Msg("Stopping delivery loop")
 		return
+	case <-consumersChanged:
+		return
 	case <-q.messageSignal:
 		// There is at least one message in the priority queue
 		for q.Len() > 0 {
+			if q.consumers.Load() == 0 {
+				// The last consumer left mid-drain: go back to idling, and
+				// re-arm the signal so the next consumer drains the rest.
+				q.signalMessages()
+				return
+			}
 			msg := q.Pop()
 			if msg == nil {
 				return
 			}
-			handled := q.deliverMessage(vh, *msg)
+			handled := q.deliverMessage(vh, *msg, consumersChanged)
 
 			isDone := requeueOnShutdown(q, *msg, handled)
 			if isDone {
@@ -129,16 +180,20 @@ func (q *Queue) deliverFromPriorityQueue(vh *VHost) {
 	}
 }
 
-func (q *Queue) deliverFromFIFOQueue(vh *VHost) {
+// deliverFromFIFOQueue delivers one message. Like deliverFromPriorityQueue,
+// it returns early when consumersChanged fires.
+func (q *Queue) deliverFromFIFOQueue(vh *VHost, consumersChanged <-chan struct{}) {
 	select {
 	case <-q.deliveryCtx.Done():
 		log.Debug().Str("queue", q.Name).Msg("Stopping delivery loop")
+		return
+	case <-consumersChanged:
 		return
 	case msg := <-q.messages:
 		q.mu.Lock()
 		q.count--
 		q.mu.Unlock()
-		handled := q.deliverMessage(vh, msg)
+		handled := q.deliverMessage(vh, msg, consumersChanged)
 
 		isDone := requeueOnShutdown(q, msg, handled)
 		if isDone {
@@ -168,8 +223,10 @@ func requeueOnShutdown(q *Queue, msg Message, handled bool) bool {
 // deliverMessage delivers msg to one of the queue's consumers. It returns
 // false only when it gave up because the delivery loop is stopping, without
 // delivering or requeuing msg; the caller then requeues it. In every other
-// case msg has been delivered, requeued or dead-lettered.
-func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
+// case msg has been delivered, requeued or dead-lettered. While every
+// consumer is throttled it also wakes on consumersChanged and refreshes its
+// consumer list.
+func (q *Queue) deliverMessage(vh *VHost, msg Message, consumersChanged <-chan struct{}) bool {
 	// Verify if TTL is enabled
 	if vh.handleTTLExpiration(msg, q) {
 		return true
@@ -178,7 +235,8 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 	log.Debug().Str("queue", q.Name).Str("id", msg.ID).Msg("Delivering message to consumers")
 	consumers := vh.GetActiveConsumersForQueue(q.Name)
 
-	// No consumers available, requeue and wait
+	// The last consumer went away after the loop took the message: put it
+	// back. The loop then idles until a consumer arrives.
 	if len(consumers) == 0 {
 		log.Debug().Str("queue", q.Name).Msg("No consumers available, requeuing message")
 		// Check if context was cancelled before requeuing
@@ -189,7 +247,6 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 		default:
 			q.Push(msg)
 			vh.collector.RecordQueueRequeue(q.Name)
-			time.Sleep(100 * time.Millisecond)
 			return true
 		}
 	}
@@ -260,6 +317,15 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 				select {
 				case <-anyState.unackedChanged:
 					// A slot opened up, retry immediately
+					continue
+				case <-consumersChanged:
+					// A consumer came or went: retry with the current list.
+					consumers = vh.GetActiveConsumersForQueue(q.Name)
+					if len(consumers) == 0 {
+						q.Push(msg)
+						vh.collector.RecordQueueRequeue(q.Name)
+						return true // the loop idles until a consumer arrives
+					}
 					continue
 				case <-time.After(1 * time.Second):
 					// Timeout, will retry or give up based on maxRounds
@@ -517,6 +583,16 @@ func (q *Queue) Push(msg Message) {
 	}
 }
 
+// signalMessages tells the delivery loop that the priority queue holds
+// messages. It never blocks.
+func (q *Queue) signalMessages() {
+	select {
+	case q.messageSignal <- struct{}{}:
+	default:
+		// signal already pending
+	}
+}
+
 func (q *Queue) pushPriority(msg Message) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -550,11 +626,7 @@ func (q *Queue) pushPriority(msg Message) {
 			Msg("Pushed message to queue")
 
 		// Notify delivery loop that a new message is available
-		select {
-		case q.messageSignal <- struct{}{}:
-		default:
-			// signal already pending
-		}
+		q.signalMessages()
 	default:
 		log.Debug().
 			Str("queue", q.Name).
