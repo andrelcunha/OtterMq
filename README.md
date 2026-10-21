@@ -188,13 +188,19 @@ ottermq
 
 ## 🐳 Docker
 
-You can run OtterMq using Docker:
+Images are published to the GitHub Container Registry: `latest` from `main`, and a version tag (e.g. `0.20.0` and `0.20`) for each `v*` release tag.
+
+```sh
+docker run -p 5672:5672 -p 3000:3000 ghcr.io/ottermq/ottermq:latest
+```
+
+To build and run from source instead:
 
 ```sh
 docker compose up --build
 ```
 
-This uses the provided `Dockerfile` and `docker-compose.yml` for convenience.
+This uses `packaging/docker/Dockerfile` and `docker-compose.yml`.
 
 ## 🚧 Development Status
 

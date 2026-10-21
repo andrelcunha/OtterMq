@@ -15,8 +15,9 @@ COPY go.mod go.sum ./
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
 RUN go mod download
 
-# Download swaggo for generating swagger docs
-RUN go install github.com/swaggo/swag/cmd/swag@latest
+# Install the swag CLI at the same version as the swaggo/swag module in go.mod,
+# so the generated docs match the library and builds are reproducible
+RUN go install github.com/swaggo/swag/cmd/swag@$(go list -m -f '{{.Version}}' github.com/swaggo/swag)
 
 # Copy the source from the current directory to the Working Directory inside the container
 COPY . .
