@@ -14,18 +14,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version-file: go.mod
 
     - name: Go Build
       run: go build -v ./...
-    
+
     - name: Make Build
       run: make build
 
-    - name: Test
-      run: go test -v -timeout 300s ./...
+  # Any race report fails the job.
+  test-race:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Unit tests (race detector)
+      run: go test -race -timeout 20m ./internal/... ./pkg/... ./web/... ./config/... ./cmd/...
+
+  # The e2e suite starts its own broker on localhost:5672.
+  e2e-race:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: E2E tests (race detector)
+      run: go test -race -timeout 30m ./tests/e2e/
