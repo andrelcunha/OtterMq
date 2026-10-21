@@ -442,46 +442,9 @@ func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
 
 	// Now safe to close the messages channel
 	close(queue.messages)
-	// verify if there are any bindings to this queue and remove them
+	// Remove every binding to this queue, whatever the exchange type
 	for _, exchange := range vh.Exchanges {
-		// Routing keys to bindings
-		switch exchange.Typ {
-		case DIRECT:
-			for rk, bindings := range exchange.Bindings {
-				for i, b := range bindings {
-					if b.Queue.Name == name {
-						exchange.Bindings[rk] = append(bindings[:i], bindings[i+1:]...)
-						break
-					}
-				}
-				if len(exchange.Bindings[rk]) == 0 {
-					delete(exchange.Bindings, rk)
-					// Check if the exchange can be auto-deleted
-					if deleted, err := vh.checkAutoDeleteExchangeUnlocked(exchange.Name); err != nil {
-						log.Printf("Failed to check auto-delete exchange: %v", err)
-					} else if deleted {
-						log.Printf("Exchange %s was auto-deleted", exchange.Name)
-					}
-				}
-			}
-		case FANOUT:
-			bindings := exchange.Bindings[""]
-			for i, b := range bindings {
-				if b.Queue.Name == name {
-					exchange.Bindings[""] = append(bindings[:i], bindings[i+1:]...)
-					break
-				}
-			}
-			if len(exchange.Bindings[""]) == 0 {
-				delete(exchange.Bindings, "")
-				// Check if the exchange can be auto-deleted
-				if deleted, err := vh.checkAutoDeleteExchangeUnlocked(exchange.Name); err != nil {
-					log.Printf("Failed to check auto-delete exchange: %v", err)
-				} else if deleted {
-					log.Printf("Exchange %s was auto-deleted", exchange.Name)
-				}
-			}
-		}
+		vh.removeQueueBindingsUnlocked(exchange, queue)
 	}
 
 	// Remove the queue from the VHost's queue map
@@ -737,4 +700,41 @@ func (vh *VHost) retrievePassiveQueue(props *QueueProperties, name string) (*Que
 
 func generateRandomQueueName() string {
 	return "amq.gen-" + generatePseudoRandomString(16)
+}
+
+// removeQueueBindingsUnlocked removes all of exchange's bindings to queue,
+// under any routing key and with any arguments, and their persisted state.
+// It works the same for every exchange type, since all of them store bindings
+// by routing key. If the exchange is auto-delete and has no bindings left, it
+// is deleted. Callers must hold vh.mu.
+func (vh *VHost) removeQueueBindingsUnlocked(exchange *Exchange, queue *Queue) {
+	removed := false
+	for rk, bindings := range exchange.Bindings {
+		kept := bindings[:0]
+		for _, b := range bindings {
+			if b.Queue.Name != queue.Name {
+				kept = append(kept, b)
+				continue
+			}
+			removed = true
+			if exchange.Props.Durable && queue.Props.Durable && vh.persist != nil {
+				if err := vh.persist.DeleteBindingState(vh.Name, exchange.Name, queue.Name, rk, b.Args); err != nil {
+					log.Error().Err(err).Str("exchange", exchange.Name).Str("queue", queue.Name).Msg("Failed to delete binding state")
+				}
+			}
+		}
+		if len(kept) == 0 {
+			delete(exchange.Bindings, rk)
+		} else {
+			exchange.Bindings[rk] = kept
+		}
+	}
+	if !removed {
+		return
+	}
+	if deleted, err := vh.checkAutoDeleteExchangeUnlocked(exchange.Name); err != nil {
+		log.Error().Err(err).Str("exchange", exchange.Name).Msg("Failed to check auto-delete exchange")
+	} else if deleted {
+		log.Debug().Str("exchange", exchange.Name).Msg("Exchange was auto-deleted")
+	}
 }
