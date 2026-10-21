@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bad protocol header and on any other handshake failure. Each client is now offered the
   configured heartbeat, frame-max and channel-max instead of the values the previous client sent
   back (#195).
+- The broker now closes the socket when it drops a connection: after a heartbeat timeout, a
+  frame read or parse error, or any other cleanup. Before, it only forgot the connection, so the
+  socket and its reader goroutine stayed open and the client kept publishing into the void. A
+  client that sends nothing during its first second after `connection.open-ok` is no longer
+  treated as a missed heartbeat (part of #199).
 
 ## [v0.20.0]
 

@@ -513,8 +513,15 @@ func (b *Broker) GetConnectionByName(name string) (*amqp.ConnectionInfo, error) 
 }
 
 func (b *Broker) Shutdown() {
-	for conn := range b.Connections {
-		conn.Close()
+	// Collect under the lock: closing triggers cleanups that modify the map.
+	b.mu.Lock()
+	clients := make([]*amqp.AmqpClient, 0, len(b.Connections))
+	for _, connInfo := range b.Connections {
+		clients = append(clients, connInfo.Client)
+	}
+	b.mu.Unlock()
+	for _, client := range clients {
+		client.CloseConn()
 	}
 }
 
