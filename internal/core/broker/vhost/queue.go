@@ -119,9 +119,9 @@ func (q *Queue) deliverFromPriorityQueue(vh *VHost) {
 			if msg == nil {
 				return
 			}
-			q.deliverMessage(vh, *msg)
+			handled := q.deliverMessage(vh, *msg)
 
-			isDone := requeueOnShutdown(q, *msg)
+			isDone := requeueOnShutdown(q, *msg, handled)
 			if isDone {
 				return
 			}
@@ -138,32 +138,41 @@ func (q *Queue) deliverFromFIFOQueue(vh *VHost) {
 		q.mu.Lock()
 		q.count--
 		q.mu.Unlock()
-		q.deliverMessage(vh, msg)
+		handled := q.deliverMessage(vh, msg)
 
-		isDone := requeueOnShutdown(q, msg)
+		isDone := requeueOnShutdown(q, msg, handled)
 		if isDone {
 			return
 		}
 	}
 }
 
-// requeueOnShutdown checks if the delivery context is done and requeues the message if so.
-// It returns true if the delivery loop should stop.
-func requeueOnShutdown(q *Queue, msg Message) bool {
+// requeueOnShutdown reports whether the delivery loop should stop because its
+// context is done. If deliverMessage left the message unhandled (it stopped
+// for the shutdown before delivering or requeuing it), the message is
+// requeued here. A handled message is never pushed again: it was delivered,
+// requeued or dead-lettered already, and pushing it would duplicate it.
+func requeueOnShutdown(q *Queue, msg Message, handled bool) bool {
 	select {
 	case <-q.deliveryCtx.Done():
-		log.Debug().Str("queue", q.Name).Msg("Delivery loop cancelled, requeuing message and stopping")
-		q.Push(msg)
+		if !handled {
+			log.Debug().Str("queue", q.Name).Msg("Delivery loop cancelled, requeuing message and stopping")
+			q.Push(msg)
+		}
 		return true
 	default:
 	}
 	return false
 }
 
-func (q *Queue) deliverMessage(vh *VHost, msg Message) {
+// deliverMessage delivers msg to one of the queue's consumers. It returns
+// false only when it gave up because the delivery loop is stopping, without
+// delivering or requeuing msg; the caller then requeues it. In every other
+// case msg has been delivered, requeued or dead-lettered.
+func (q *Queue) deliverMessage(vh *VHost, msg Message) bool {
 	// Verify if TTL is enabled
 	if vh.handleTTLExpiration(msg, q) {
-		return
+		return true
 	}
 
 	log.Debug().Str("queue", q.Name).Str("id", msg.ID).Msg("Delivering message to consumers")
@@ -176,12 +185,12 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) {
 		select {
 		case <-q.deliveryCtx.Done():
 			log.Debug().Str("queue", q.Name).Msg("Delivery loop stopped, not requeuing")
-			return
+			return false
 		default:
 			q.Push(msg)
 			vh.collector.RecordQueueRequeue(q.Name)
 			time.Sleep(100 * time.Millisecond)
-			return
+			return true
 		}
 	}
 
@@ -215,7 +224,7 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) {
 					// Check if context was cancelled before requeuing
 					select {
 					case <-q.deliveryCtx.Done():
-						delivered = true // Exit loop without requeuing
+						return false // Stopping: the caller requeues it
 					default:
 						q.Push(msg)
 						vh.collector.RecordQueueRequeue(q.Name)
@@ -248,7 +257,7 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) {
 					// Timeout, will retry or give up based on maxRounds
 					continue
 				case <-q.deliveryCtx.Done():
-					return
+					return false
 				}
 			} else {
 				// No state available, just sleep briefly
@@ -263,6 +272,7 @@ func (q *Queue) deliverMessage(vh *VHost, msg Message) {
 		q.Push(msg)
 		vh.collector.RecordQueueRequeue(q.Name)
 	}
+	return true
 }
 
 func (q *Queue) stopDeliveryLoop() {
