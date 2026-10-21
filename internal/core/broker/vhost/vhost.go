@@ -332,14 +332,14 @@ func (vh *VHost) loadPersistedState() {
 	}
 }
 
-func (vh *VHost) ListConsumers(cb func(queueName string, consumer Consumer, dtos []models.ConsumerDTO)) error {
+func (vh *VHost) ListConsumers(cb func(queueName string, consumer *Consumer, dtos []models.ConsumerDTO)) error {
 	vh.mu.Lock()
 	defer vh.mu.Unlock()
 
 	// Iterate through all queues and their consumers
 	for queueName, queueConsumers := range vh.ConsumersByQueue {
 		for _, consumer := range queueConsumers {
-			cb(queueName, *consumer, nil)
+			cb(queueName, consumer, nil)
 		}
 	}
 	return nil
@@ -349,7 +349,7 @@ type NoConsumersError interface {
 	error
 }
 
-func (vh *VHost) ListQueueConsumers(queueName string, cb func(consumer Consumer, dtos []any)) error {
+func (vh *VHost) ListQueueConsumers(queueName string, cb func(consumer *Consumer, dtos []any)) error {
 	vh.mu.Lock()
 	defer vh.mu.Unlock()
 
@@ -363,7 +363,7 @@ func (vh *VHost) ListQueueConsumers(queueName string, cb func(consumer Consumer,
 
 	consumers := make([]any, 0, len(queueConsumers))
 	for _, consumer := range queueConsumers {
-		cb(*consumer, consumers)
+		cb(consumer, consumers)
 	}
 	return nil
 

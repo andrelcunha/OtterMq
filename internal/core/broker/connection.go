@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -56,7 +55,7 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 		}
 
 		if len(frame) > 0 { // any octet shall be valid as heartbeat #AMQP_compliance
-			if !b.registerHeartbeat(conn) {
+			if !b.registerHeartbeat(client) {
 				log.Debug().Str("client", conn.RemoteAddr().String()).Msg("Connection already cleaned up, closing socket")
 				client.CloseConn()
 				return
@@ -230,15 +229,13 @@ func (b *Broker) connectionCloseOk(conn net.Conn) {
 }
 
 // registerHeartbeat registers a heartbeat for a connection. It returns false
-// if the connection is no longer registered, i.e. it was already cleaned up.
-func (b *Broker) registerHeartbeat(conn net.Conn) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	connInfo, exists := b.Connections[conn]
-	if !exists {
+// if the connection is being torn down: cleanupConnection cancels the
+// client's context, so no b.mu round-trip is needed on every frame.
+func (b *Broker) registerHeartbeat(client *amqp.AmqpClient) bool {
+	if client.Ctx.Err() != nil {
 		return false
 	}
-	connInfo.Client.LastHeartbeat = time.Now()
+	client.TouchHeartbeat()
 	return true
 }
 

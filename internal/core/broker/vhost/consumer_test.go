@@ -99,7 +99,7 @@ func TestRegisterConsumer_ValidConsumer(t *testing.T) {
 	if !exists {
 		t.Error("Consumer not found in primary registry")
 	} else {
-		if !registeredConsumer.Active {
+		if !registeredConsumer.Active.Load() {
 			t.Error("Consumer should be active")
 		}
 		if registeredConsumer.QueueName != "test-queue" {

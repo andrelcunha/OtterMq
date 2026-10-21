@@ -261,6 +261,13 @@ func TestDLX_RoutingKeyOverride(t *testing.T) {
 	dlqAll, err := tc.Ch.QueueDeclare("dlq-all", false, true, false, false, nil)
 	require.NoError(t, err)
 
+	// Fixed names: delete the queues so a -count=N rerun starts empty.
+	defer func() {
+		for _, q := range []string{"main-override", dlqErrors.Name, dlqAll.Name} {
+			_, _ = tc.Ch.QueueDelete(q, false, false, false)
+		}
+	}()
+
 	err = tc.Ch.QueueBind(dlqErrors.Name, "error.#", "dlx-topic", false, nil)
 	require.NoError(t, err)
 	err = tc.Ch.QueueBind(dlqAll.Name, "#", "dlx-topic", false, nil)
@@ -365,6 +372,13 @@ func TestDLX_MultipleNack(t *testing.T) {
 
 	dlq, err := tc.Ch.QueueDeclare("dlq-multi", false, true, false, false, nil)
 	require.NoError(t, err)
+
+	// Fixed names: delete the queues so a -count=N rerun starts empty.
+	defer func() {
+		for _, q := range []string{"main-multi", dlq.Name} {
+			_, _ = tc.Ch.QueueDelete(q, false, false, false)
+		}
+	}()
 
 	err = tc.Ch.QueueBind(dlq.Name, "dead", "dlx-multi", false, nil)
 	require.NoError(t, err)

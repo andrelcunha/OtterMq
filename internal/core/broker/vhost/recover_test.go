@@ -123,9 +123,9 @@ func TestHandleBasicRecover_RequeueFalse_ConsumerExists(t *testing.T) {
 		Channel:      1,
 		QueueName:    "q1",
 		ConnectionID: connID,
-		Active:       true,
 		Props:        &ConsumerProperties{NoAck: false},
 	}
+	consumer.Active.Store(true)
 
 	consumerKey := ConsumerKey{Channel: 1, Tag: "ctag1"}
 	vh.mu.Lock()
@@ -266,9 +266,9 @@ func TestHandleBasicRecover_RequeueFalse_DeliveryFails(t *testing.T) {
 		Channel:      1,
 		QueueName:    "q1",
 		ConnectionID: connID,
-		Active:       true,
 		Props:        &ConsumerProperties{NoAck: false},
 	}
+	consumer.Active.Store(true)
 
 	consumerKey := ConsumerKey{Channel: 1, Tag: "ctag1"}
 	vh.mu.Lock()

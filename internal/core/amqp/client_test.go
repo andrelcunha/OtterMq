@@ -22,7 +22,7 @@ func TestHeartbeatPanicCancelsOnlyThatConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := NewAmqpClient(panicConn{server}, &AmqpClientConfig{HeartbeatInterval: 2}, ctx, cancel)
-	c.LastHeartbeat = time.Now()
+	c.TouchHeartbeat()
 	c.StartHeartbeat()
 
 	select {

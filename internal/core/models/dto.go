@@ -68,7 +68,7 @@ func MapConnectionInfoDTO(connection amqp.ConnectionInfo) ConnectionInfoDTO {
 		SSL:           connection.Client.Config.SSL,
 		Protocol:      connection.Client.Config.Protocol,
 		Channels:      channels,
-		LastHeartbeat: connection.Client.LastHeartbeat,
+		LastHeartbeat: connection.Client.LastHeartbeat(),
 		ConnectedAt:   connection.Client.ConnectedAt,
 	}
 	return connInfo

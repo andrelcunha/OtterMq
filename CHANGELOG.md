@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A field table with a truncated 64-bit signed integer (`L`) field is now rejected with an error.
   Before, `DecodeTable` returned an empty table and no error (#182, #287 — thanks
   @slopggobblercobbler81).
+- Fixed data races between the delivery loop and the connection and channel handlers: a
+  connection's last-heartbeat time, a consumer's active flag, and a channel's `basic.qos` and
+  flow settings were read without the lock their writers held. The race detector reported
+  them, and a delivery could see a half-updated prefetch limit. Recording a heartbeat no longer
+  takes the broker-wide lock on every inbound frame (#217).
 
 ## [v0.20.0]
 

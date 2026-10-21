@@ -30,8 +30,8 @@ func (s *Service) ListVhostConsumers(vhostName string) ([]models.ConsumerDTO, er
 }
 
 func (s *Service) newFunction(vh *vhost.VHost, consumers []models.ConsumerDTO) ([]models.ConsumerDTO, error) {
-	err := vh.ListConsumers(func(queueName string, consumer vhost.Consumer, dtos []models.ConsumerDTO) {
-		dto := s.consumerToDTO(vh, queueName, &consumer)
+	err := vh.ListConsumers(func(queueName string, consumer *vhost.Consumer, dtos []models.ConsumerDTO) {
+		dto := s.consumerToDTO(vh, queueName, consumer)
 		consumers = append(consumers, dto)
 	})
 

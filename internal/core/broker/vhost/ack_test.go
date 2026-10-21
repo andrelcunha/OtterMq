@@ -13,16 +13,17 @@ import (
 
 // helper to build a minimal consumer
 func newTestConsumer(connID ConnectionID, ch uint16, queue string, noAck bool) *Consumer {
-	return &Consumer{
+	c := &Consumer{
 		Tag:          "ctag-test",
 		Channel:      ch,
 		QueueName:    queue,
 		ConnectionID: connID,
-		Active:       true,
 		Props: &ConsumerProperties{
 			NoAck: noAck,
 		},
 	}
+	c.Active.Store(true)
+	return c
 }
 
 func newTestConsumerConnID() ConnectionID {
