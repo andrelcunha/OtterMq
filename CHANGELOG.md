@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flow settings were read without the lock their writers held. The race detector reported
   them, and a delivery could see a half-updated prefetch limit. Recording a heartbeat no longer
   takes the broker-wide lock on every inbound frame (#217).
+- A client that answers `connection.tune` with heartbeat 0 ("no heartbeats") or 1 is no
+  longer disconnected. The broker's heartbeat goroutine panicked on both values; heartbeat 0 now
+  disables heartbeats for that connection, and the broker sends heartbeats every
+  `max(1 s, heartbeat/2)` (#177).
 
 ## [v0.20.0]
 

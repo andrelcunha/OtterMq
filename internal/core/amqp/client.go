@@ -125,7 +125,12 @@ func (c *AmqpClient) TouchHeartbeat() {
 	c.lastHeartbeat.Store(time.Now().UnixNano())
 }
 
+// StartHeartbeat starts the heartbeat goroutines. A negotiated heartbeat of 0
+// disables heartbeats, so nothing is started.
 func (c *AmqpClient) StartHeartbeat() {
+	if c.Config.HeartbeatInterval == 0 {
+		return
+	}
 	go c.sendHeartbeats()
 	go c.monitorHeartbeatTimeout()
 }
@@ -166,8 +171,7 @@ func (c *AmqpClient) recoverHeartbeatPanic(where string) {
 
 func (c *AmqpClient) sendHeartbeats() {
 	defer c.recoverHeartbeatPanic("sendHeartbeats")
-	interval := time.Duration(c.Config.HeartbeatInterval>>1) * time.Second
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(heartbeatSendInterval(c.Config.HeartbeatInterval))
 	defer ticker.Stop()
 
 	for {
@@ -193,7 +197,7 @@ func (c *AmqpClient) monitorHeartbeatTimeout() {
 	for {
 		select {
 		case <-ticker.C:
-			maxInterval := time.Duration(c.Config.HeartbeatInterval<<1) * time.Second
+			maxInterval := 2 * time.Duration(c.Config.HeartbeatInterval) * time.Second
 			if time.Since(c.LastHeartbeat()) > maxInterval {
 				log.Warn().Str("addr", c.RemoteAddr).Msg("Heartbeat timeout")
 				// Spec 4.2.7: close the socket without a close handshake.
