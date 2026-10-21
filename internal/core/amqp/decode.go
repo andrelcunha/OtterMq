@@ -10,6 +10,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Variable-length fields carry their length on the wire. Read them with io.ReadFull
+// everywhere: bytes.Reader.Read reports a short read with a nil error, so a frame
+// that declares more bytes than it carries would otherwise be accepted with the
+// remainder zero-padded.
+
 // decodeTable decodes an AMQP field table from a byte slice
 func DecodeTable(data []byte) (map[string]interface{}, error) {
 
@@ -24,7 +29,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 		}
 
 		fieldName := make([]byte, fieldNameLength)
-		_, err = buf.Read(fieldName)
+		_, err = io.ReadFull(buf, fieldName)
 		if err != nil {
 			return nil, err
 		}
@@ -152,7 +157,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 			}
 
 			arrayData := make([]byte, arrayLength)
-			_, err := buf.Read(arrayData)
+			_, err := io.ReadFull(buf, arrayData)
 			if err != nil {
 				return nil, err
 			}
@@ -178,7 +183,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 			}
 
 			strValue := make([]byte, strLength)
-			_, err := buf.Read(strValue)
+			_, err := io.ReadFull(buf, strValue)
 			if err != nil {
 				return nil, err
 			}
@@ -311,7 +316,7 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 				return nil, err
 			}
 			tableData := make([]byte, tableLength)
-			if _, err := buf.Read(tableData); err != nil {
+			if _, err := io.ReadFull(buf, tableData); err != nil {
 				return nil, err
 			}
 			value, err := DecodeTable(tableData)
@@ -326,7 +331,7 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 				return nil, err
 			}
 			arrayData := make([]byte, arrayLength)
-			if _, err := buf.Read(arrayData); err != nil {
+			if _, err := io.ReadFull(buf, arrayData); err != nil {
 				return nil, err
 			}
 			value, err := DecodeArray(arrayData)
@@ -375,7 +380,7 @@ func DecodeLongStr(buf *bytes.Reader) (string, error) {
 	}
 
 	strData := make([]byte, strLen)
-	_, err = buf.Read(strData)
+	_, err = io.ReadFull(buf, strData)
 	if err != nil {
 		return "", err
 	}
@@ -391,7 +396,7 @@ func DecodeShortStr(buf *bytes.Reader) (string, error) {
 	}
 
 	strData := make([]byte, strLen)
-	_, err = buf.Read(strData)
+	_, err = io.ReadFull(buf, strData)
 	if err != nil {
 		return "", err
 	}
