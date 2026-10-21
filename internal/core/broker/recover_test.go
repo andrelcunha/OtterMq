@@ -12,8 +12,8 @@ import (
 func TestFrameLoopPanicClosesOnlyThatConnection(t *testing.T) {
 	_, _, addr := startTestBroker(t, nil, nil)
 
-	healthy, _ := dialTap(t, addr, 0)
-	victimConn, victim := dialTap(t, addr, 0)
+	healthy, _ := dialTap(t, addr, testHeartbeat)
+	victimConn, victim := dialTap(t, addr, testHeartbeat)
 	closed := victimConn.NotifyClose(make(chan *amqp091.Error, 1))
 
 	if _, err := victim.Conn.Write(poisonFrame); err != nil {
@@ -47,6 +47,6 @@ func TestHandshakePanicKeepsAccepting(t *testing.T) {
 	}
 
 	// The broker still accepts and serves new connections.
-	conn, _ := dialTap(t, addr, 0)
+	conn, _ := dialTap(t, addr, testHeartbeat)
 	roundTrip(t, conn)
 }

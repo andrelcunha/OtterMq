@@ -11,7 +11,7 @@ import (
 func TestRecoveredPanicIsCounted(t *testing.T) {
 	b, _, addr := startTestBroker(t, nil, nil)
 
-	_, victim := dialTap(t, addr, 0)
+	_, victim := dialTap(t, addr, testHeartbeat)
 	if _, err := victim.Conn.Write(poisonFrame); err != nil {
 		t.Fatalf("write poison frame: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestPanicWithBrokerLockHeldExits(t *testing.T) {
 		}
 	})
 
-	_, victim := dialTap(t, addr, 0)
+	_, victim := dialTap(t, addr, testHeartbeat)
 	if _, err := victim.Conn.Write(poisonFrame); err != nil {
 		t.Fatalf("write poison frame: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestPanicWatchdogFiresWhenAnotherCleanupIsStuck(t *testing.T) {
 		}
 	})
 
-	_, victim := dialTap(t, addr, 0)
+	_, victim := dialTap(t, addr, testHeartbeat)
 	if _, err := victim.Conn.Write(poisonFrame); err != nil {
 		t.Fatalf("write poison frame: %v", err)
 	}

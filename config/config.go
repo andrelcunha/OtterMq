@@ -9,6 +9,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// DefaultHandshakeTimeout is the default for OTTERMQ_HANDSHAKE_TIMEOUT, the
+// same as RabbitMQ's handshake_timeout.
+const DefaultHandshakeTimeout = 10 * time.Second
+
 type Config struct {
 	// Core
 	ShowLogo   bool
@@ -24,6 +28,9 @@ type Config struct {
 	Ssl                  bool
 	QueueBufferSize      int
 	MaxPriority          uint8
+	// HandshakeTimeout bounds the AMQP handshake, from accept to
+	// connection.open-ok. Non-positive values mean the default.
+	HandshakeTimeout time.Duration
 
 	// Extensions
 	EnableDLX bool // Dead-Letter Exchange
@@ -80,6 +87,7 @@ func LoadConfig(version string) *Config {
 		Ssl:                  getEnvAsBool("OTTERMQ_SSL", false),
 		QueueBufferSize:      getEnvAsInt("OTTERMQ_QUEUE_BUFFER_SIZE", 100000),
 		MaxPriority:          getEnvAsUint8("OTTERMQ_MAX_PRIORITY", 10), // 0-255 (default 10)
+		HandshakeTimeout:     getEnvAsDuration("OTTERMQ_HANDSHAKE_TIMEOUT", DefaultHandshakeTimeout),
 
 		EnableDLX: getEnvAsBool("OTTERMQ_ENABLE_DLX", true),
 		EnableTTL: getEnvAsBool("OTTERMQ_ENABLE_TTL", true),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"runtime"
 	"sync"
@@ -214,23 +215,76 @@ func (b *Broker) acceptLoop(configurations map[string]any) error {
 			log.Debug().Err(err).Msg("Accept failed")
 			continue
 		}
-		if ok := b.ShuttingDown.Load(); ok {
+		// Counted from accept, so shutdown also waits for handshakes in
+		// flight (bounded by the handshake timeout). The check and the Add
+		// happen under b.mu, like BeginShutdown, so no Add can follow the
+		// shutdown's ActiveConns.Wait.
+		b.mu.Lock()
+		if b.ShuttingDown.Load() {
+			b.mu.Unlock()
 			log.Debug().Msg("Broker is shutting down, ignoring new connection")
+			conn.Close()
 			continue
 		}
+		b.ActiveConns.Add(1)
+		b.mu.Unlock()
 		log.Debug().Str("client", conn.RemoteAddr().String()).Msg("New client waiting for connection")
-		connCtx, connCancel := context.WithCancel(b.rootCtx)
-		connInfo, err := b.handshakeGuarded(&configurations, conn, connCtx)
-		if err != nil {
-			connCancel()
-			log.Info().Err(err).Msg("Handshake failed")
-			continue
-		}
-		b.registerConnection(conn, connInfo)
-		go b.monitorConnectionLifecycle(conn, connInfo.Client, connCancel)
-
-		go b.handleConnection(conn, connInfo)
+		// The handshake writes the negotiated values into the map, so every
+		// connection needs its own copy. The nested values are read-only.
+		go b.serveConn(conn, maps.Clone(configurations))
 	}
+}
+
+// serveConn runs the handshake for an accepted socket and then serves the
+// connection. It runs in its own goroutine so that a slow or silent client
+// cannot block the accept loop.
+func (b *Broker) serveConn(conn net.Conn, configurations map[string]any) {
+	defer b.ActiveConns.Done()
+	timeout := b.config.HandshakeTimeout
+	if timeout <= 0 {
+		timeout = config.DefaultHandshakeTimeout
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		log.Debug().Err(err).Msg("Failed to set handshake deadline")
+		conn.Close()
+		return
+	}
+
+	connCtx, connCancel := context.WithCancel(b.rootCtx)
+	connInfo, err := b.handshakeGuarded(&configurations, conn, connCtx)
+	if err != nil {
+		connCancel()
+		conn.Close()
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			log.Info().Str("client", conn.RemoteAddr().String()).Dur("timeout", timeout).Msg("Handshake timed out")
+		} else {
+			log.Info().Err(err).Msg("Handshake failed")
+		}
+		return
+	}
+	// From here on liveness is the heartbeat's job.
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		log.Debug().Err(err).Msg("Failed to clear handshake deadline")
+	}
+
+	if !b.registerConnection(conn, connInfo) {
+		log.Debug().Str("client", conn.RemoteAddr().String()).Msg("Broker is shutting down, closing connection after handshake")
+		connCancel()
+		conn.Close()
+		return
+	}
+	go b.monitorConnectionLifecycle(conn, connInfo.Client, connCancel)
+
+	b.handleConnection(conn, connInfo)
+}
+
+// BeginShutdown marks the broker as shutting down. After it returns no new
+// connection is admitted or registered, so ActiveConns.Wait can be called.
+func (b *Broker) BeginShutdown() {
+	b.mu.Lock()
+	b.ShuttingDown.Store(true)
+	b.mu.Unlock()
 }
 
 func (b *Broker) monitorConnectionLifecycle(conn net.Conn, client *amqp.AmqpClient, cancel context.CancelFunc) {
