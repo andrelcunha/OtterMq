@@ -8,10 +8,12 @@ import (
 type Framer interface {
 	ReadFrame(conn net.Conn) ([]byte, error)
 	SendFrame(conn net.Conn, frame []byte) error
-	Handshake(configurations *map[string]any, conn net.Conn, connCtxt context.Context) (*ConnectionInfo, error)
+	Handshake(cfg HandshakeConfig, conn net.Conn, connCtxt context.Context) (*ConnectionInfo, error)
 	ParseFrame(frame []byte) (any, error)
 	CreateHeaderFrame(channel, classID uint16, msg Message) []byte
-	CreateBodyFrame(channel uint16, content []byte) []byte
+	// CreateBodyFrame splits content into body frames of at most frameMax
+	// octets each (header and frame-end included).
+	CreateBodyFrame(channel uint16, frameMax uint32, content []byte) []byte
 
 	// Basic Methods
 
@@ -67,8 +69,8 @@ func (d *DefaultFramer) SendFrame(conn net.Conn, frame []byte) error {
 	return sendFrame(conn, frame)
 }
 
-func (d *DefaultFramer) Handshake(configurations *map[string]any, conn net.Conn, connCtxt context.Context) (*ConnectionInfo, error) {
-	return handshake(configurations, conn, connCtxt)
+func (d *DefaultFramer) Handshake(cfg HandshakeConfig, conn net.Conn, connCtxt context.Context) (*ConnectionInfo, error) {
+	return handshake(cfg, conn, connCtxt)
 }
 
 func (d *DefaultFramer) ParseFrame(frame []byte) (any, error) {
@@ -79,8 +81,8 @@ func (d *DefaultFramer) CreateHeaderFrame(channel, classID uint16, msg Message) 
 	return createHeaderFrame(channel, classID, msg)
 }
 
-func (d *DefaultFramer) CreateBodyFrame(channel uint16, content []byte) []byte {
-	return createBodyFrame(channel, content)
+func (d *DefaultFramer) CreateBodyFrame(channel uint16, frameMax uint32, content []byte) []byte {
+	return createBodyFrame(channel, frameMax, content)
 }
 
 // REGION Queue Methods

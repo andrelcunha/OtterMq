@@ -103,11 +103,11 @@ const poisonChannel = 0xBEEF
 // poisonFrame is a heartbeat frame on poisonChannel.
 var poisonFrame = []byte{byte(amqp.TYPE_HEARTBEAT), 0xBE, 0xEF, 0, 0, 0, 0, amqp.FRAME_END}
 
-func (f *faultyFramer) Handshake(configurations *map[string]any, conn net.Conn, connCtx context.Context) (*amqp.ConnectionInfo, error) {
+func (f *faultyFramer) Handshake(cfg amqp.HandshakeConfig, conn net.Conn, connCtx context.Context) (*amqp.ConnectionInfo, error) {
 	if f.panicNextHandshake.CompareAndSwap(true, false) {
 		panic("injected handshake panic")
 	}
-	info, err := f.Framer.Handshake(configurations, conn, connCtx)
+	info, err := f.Framer.Handshake(cfg, conn, connCtx)
 	if f.afterHandshake != nil {
 		f.afterHandshake()
 	}

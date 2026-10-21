@@ -67,52 +67,30 @@ func createConnectionCloseOkFrame(channel uint16) []byte {
 	return frame
 }
 
-func createConnectionStartFrame(configurations *map[string]any) []byte {
+func createConnectionStartFrame(cfg HandshakeConfig) ([]byte, error) {
 	var payloadBuf bytes.Buffer
 	channelNum := uint16(0)
 	classID := CONNECTION
 	methodID := CONNECTION_START
 
+	if len(cfg.Mechanisms) == 0 {
+		return nil, fmt.Errorf("handshake config has no mechanisms")
+	}
+	if len(cfg.Locales) == 0 {
+		return nil, fmt.Errorf("handshake config has no locales")
+	}
+
 	payloadBuf.WriteByte(0) // version-major
 	payloadBuf.WriteByte(9) // version-minor
 
-	serverPropsRaw, ok := (*configurations)["serverProperties"]
-	if !ok {
-		log.Fatal().Msg("serverProperties not found in configurations")
-	}
-	serverProperties, ok := serverPropsRaw.(map[string]any)
-	if !ok {
-		log.Fatal().Msg("serverProperties is not a map[string]any")
-	}
-	encodedProperties := EncodeTable(serverProperties)
-
+	encodedProperties := EncodeTable(cfg.ServerProperties)
 	EncodeLongStr(&payloadBuf, encodedProperties)
-
-	// Extract mechanisms
-	mechanismsRaw, ok := (*configurations)["mechanisms"]
-	if !ok {
-		log.Fatal().Msg("mechanisms not found in configurations")
-	}
-	mechanismsSlice, ok := mechanismsRaw.([]string)
-	if !ok || len(mechanismsSlice) == 0 {
-		log.Fatal().Msg("mechanisms is not a non-empty []string")
-	}
-	EncodeLongStr(&payloadBuf, []byte(mechanismsSlice[0]))
-
-	// Extract locales
-	localesRaw, ok := (*configurations)["locales"]
-	if !ok {
-		log.Fatal().Msg("locales not found in configurations")
-	}
-	localesSlice, ok := localesRaw.([]string)
-	if !ok || len(localesSlice) == 0 {
-		log.Fatal().Msg("locales is not a non-empty []string")
-	}
-	EncodeLongStr(&payloadBuf, []byte(localesSlice[0]))
+	EncodeLongStr(&payloadBuf, []byte(cfg.Mechanisms[0]))
+	EncodeLongStr(&payloadBuf, []byte(cfg.Locales[0]))
 
 	frame := formatMethodFrame(channelNum, classID, methodID, payloadBuf.Bytes())
 	log.Trace().Msgf("Sending CONNECTION_START frame: %v", frame)
-	return frame
+	return frame, nil
 }
 
 func createConnectionTuneFrame(tune *ConnectionTune) []byte {
@@ -168,15 +146,6 @@ func createConnectionOpenOkFrame() []byte {
 	return frame
 }
 
-func fineTune(tune *ConnectionTune) *ConnectionTune {
-	// TODO: get values from config
-	tune.ChannelMax = getSmalestShortInt(2047, tune.ChannelMax)
-	tune.FrameMax = getSmalestLongInt(131072, tune.FrameMax)
-	tune.Heartbeat = getSmalestShortInt(10, tune.Heartbeat)
-
-	return tune
-}
-
 func createHeartbeatFrame() []byte {
 	frame := make([]byte, 8)
 	frame[0] = byte(TYPE_HEARTBEAT)
@@ -195,15 +164,6 @@ func parseConnectionMethod(methodID uint16, payload []byte) (any, error) {
 	case uint16(CONNECTION_START_OK):
 		log.Trace().Bytes("payload", payload).Msg("Received connection.start-ok")
 		return parseConnectionStartOkFrame(payload)
-
-	case uint16(CONNECTION_TUNE):
-		log.Debug().Msg("Received CONNECTION_TUNE frame")
-		tuneResponse, err := parseConnectionTuneFrame(payload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse connection.tune frame: %v", err)
-		}
-		tuneOkRequest := createConnectionTuneOkFrame(fineTune(tuneResponse))
-		return tuneOkRequest, nil
 
 	case uint16(CONNECTION_TUNE_OK):
 		log.Debug().Msg("Received CONNECTION_TUNE_OK frame")

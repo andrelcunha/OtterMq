@@ -20,9 +20,9 @@ OtterMQ is configured via environment variables. All settings have sensible defa
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTTERMQ_HEARTBEAT_INTERVAL` | `60` | Server-side heartbeat interval in seconds (0 = disable) |
-| `OTTERMQ_CHANNEL_MAX` | `2048` | Maximum number of channels per connection |
-| `OTTERMQ_FRAME_MAX` | `131072` | Maximum frame size in bytes (128 KB) |
+| `OTTERMQ_HEARTBEAT_INTERVAL` | `60` | Heartbeat interval in seconds offered to clients, and the most a client may choose (0 = no limit). A client that answers 0 disables heartbeats for its connection |
+| `OTTERMQ_CHANNEL_MAX` | `2048` | Highest channel number a client may open (0 = 65535). `channel.open` above it, or on channel 0, closes the connection with 530 |
+| `OTTERMQ_FRAME_MAX` | `131072` | Maximum frame size in bytes (128 KB), header included. Values below 4096 are raised to 4096; 0 means 131072 |
 | `OTTERMQ_SSL` | `false` | Enable SSL/TLS for AMQP connections |
 | `OTTERMQ_HANDSHAKE_TIMEOUT` | `10s` | Time a client has to finish the AMQP handshake before the broker closes the socket (duration format; non-positive values mean the default) |
 

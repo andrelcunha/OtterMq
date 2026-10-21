@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"runtime"
 	"sync"
@@ -142,7 +141,7 @@ func (b *Broker) Start() error {
 	}
 	log.Info().Str("version", b.config.Version).Msg("🦦 OtterMQ")
 
-	configurations := b.setConfigurations()
+	handshakeCfg := b.handshakeConfig()
 
 	addr := fmt.Sprintf("%s:%s", b.config.BrokerHost, b.config.BrokerPort)
 
@@ -157,7 +156,7 @@ func (b *Broker) Start() error {
 	// Signal that the broker is ready to accept connections
 	close(b.Ready)
 
-	return b.acceptLoop(configurations)
+	return b.acceptLoop(handshakeCfg)
 }
 
 // Logo 🦦
@@ -177,7 +176,9 @@ Y88b. .d88P Y88b. Y88b. Y8b.    888    888   "   888Y88b.Y8b88P
 `)
 }
 
-func (b *Broker) setConfigurations() map[string]any {
+// handshakeConfig builds the handshake settings once from the broker config.
+// Every connection gets a copy; nothing in it is written afterwards.
+func (b *Broker) handshakeConfig() amqp.HandshakeConfig {
 	capabilities := map[string]any{
 		// TODO: dynamically set capabilities based on enabled features
 		"basic.nack":             true,
@@ -193,20 +194,17 @@ func (b *Broker) setConfigurations() map[string]any {
 		"platform":     PLATFORM,
 	}
 
-	configurations := map[string]any{
-		"mechanisms":        []string{"PLAIN"},
-		"locales":           []string{"en_US"},
-		"serverProperties":  serverProperties,
-		"heartbeatInterval": b.config.HeartbeatIntervalMax,
-		"frameMax":          b.config.FrameMax,
-		"channelMax":        b.config.ChannelMax,
-		"ssl":               b.config.Ssl,
-		"protocol":          DEFAULT_PROTOCOL,
+	return amqp.HandshakeConfig{
+		Protocol:         DEFAULT_PROTOCOL,
+		ServerProperties: serverProperties,
+		Mechanisms:       []string{"PLAIN"},
+		Locales:          []string{"en_US"},
+		SSL:              b.config.Ssl,
+		Tuning:           amqp.NewServerTuning(b.config.ChannelMax, b.config.FrameMax, b.config.HeartbeatIntervalMax),
 	}
-	return configurations
 }
 
-func (b *Broker) acceptLoop(configurations map[string]any) error {
+func (b *Broker) acceptLoop(handshakeCfg amqp.HandshakeConfig) error {
 	for {
 		conn, err := b.listener.Accept()
 		if err != nil {
@@ -231,16 +229,14 @@ func (b *Broker) acceptLoop(configurations map[string]any) error {
 		b.ActiveConns.Add(1)
 		b.mu.Unlock()
 		log.Debug().Str("client", conn.RemoteAddr().String()).Msg("New client waiting for connection")
-		// The handshake writes the negotiated values into the map, so every
-		// connection needs its own copy. The nested values are read-only.
-		go b.serveConn(conn, maps.Clone(configurations))
+		go b.serveConn(conn, handshakeCfg)
 	}
 }
 
 // serveConn runs the handshake for an accepted socket and then serves the
 // connection. It runs in its own goroutine so that a slow or silent client
 // cannot block the accept loop.
-func (b *Broker) serveConn(conn net.Conn, configurations map[string]any) {
+func (b *Broker) serveConn(conn net.Conn, handshakeCfg amqp.HandshakeConfig) {
 	defer b.ActiveConns.Done()
 	timeout := b.config.HandshakeTimeout
 	if timeout <= 0 {
@@ -253,7 +249,7 @@ func (b *Broker) serveConn(conn net.Conn, configurations map[string]any) {
 	}
 
 	connCtx, connCancel := context.WithCancel(b.rootCtx)
-	connInfo, err := b.handshakeGuarded(&configurations, conn, connCtx)
+	connInfo, err := b.handshakeGuarded(handshakeCfg, conn, connCtx)
 	if err != nil {
 		connCancel()
 		conn.Close()
@@ -712,6 +708,30 @@ func (b *Broker) GetConnectionID(conn net.Conn) (vhost.ConnectionID, bool) {
 	defer b.connectionsMu.RUnlock()
 	connID, ok := b.connToID[conn]
 	return connID, ok
+}
+
+// negotiatedFrameMax returns the frame-max negotiated for conn, or 0 (no
+// limit) if the connection is gone.
+func (b *Broker) negotiatedFrameMax(conn net.Conn) uint32 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	connInfo, ok := b.Connections[conn]
+	if !ok || connInfo.Client == nil {
+		return 0
+	}
+	return connInfo.Client.Negotiated.FrameMax
+}
+
+// negotiatedChannelMax returns the highest channel id conn may open, or 0
+// if the connection is gone.
+func (b *Broker) negotiatedChannelMax(conn net.Conn) uint16 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	connInfo, ok := b.Connections[conn]
+	if !ok || connInfo.Client == nil {
+		return 0
+	}
+	return connInfo.Client.Negotiated.ChannelMax
 }
 
 func (b *Broker) SendFrame(connID vhost.ConnectionID, channelID uint16, frame []byte) error {

@@ -71,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer disconnected. The broker's heartbeat goroutine panicked on both values; heartbeat 0 now
   disables heartbeats for that connection, and the broker sends heartbeats every
   `max(1 s, heartbeat/2)` (#177).
+- `connection.tune-ok` is now negotiated instead of accepted verbatim. channel-max 0 or above the
+  configured `OTTERMQ_CHANNEL_MAX` means the configured value; frame-max 0 means
+  `OTTERMQ_FRAME_MAX`, and a frame-max below 4096 or above it closes the connection with 530
+  `NOT_ALLOWED`; the heartbeat is capped at `OTTERMQ_HEARTBEAT_INTERVAL` when that is non-zero.
+  `channel.open` on channel 0 or above the negotiated channel-max closes the connection with 530.
+  Message bodies sent to clients (deliveries, `basic.get-ok`, `basic.return`) are split into body
+  frames that fit the negotiated frame-max; before, a body of any size went out as one frame.
+  `OTTERMQ_FRAME_MAX=0` now means 131072, and values below 4096 are raised to 4096 (#198).
 
 ## [v0.20.0]
 

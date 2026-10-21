@@ -24,14 +24,14 @@ func fatalAfterPanic(msg string) {
 
 // handshakeGuarded runs the AMQP handshake and turns a panic into an error,
 // so that one malformed handshake cannot take down the broker.
-func (b *Broker) handshakeGuarded(configurations *map[string]any, conn net.Conn, connCtx context.Context) (connInfo *amqp.ConnectionInfo, err error) {
+func (b *Broker) handshakeGuarded(cfg amqp.HandshakeConfig, conn net.Conn, connCtx context.Context) (connInfo *amqp.ConnectionInfo, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.handleConnectionPanic(conn, nil, "handshake", r)
 			connInfo, err = nil, fmt.Errorf("panic during handshake: %v", r)
 		}
 	}()
-	return b.framer.Handshake(configurations, conn, connCtx)
+	return b.framer.Handshake(cfg, conn, connCtx)
 }
 
 // handleConnectionPanic logs a panic recovered in a goroutine serving conn,

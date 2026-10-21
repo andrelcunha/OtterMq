@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,15 +16,14 @@ import (
 	"github.com/ottermq/ottermq/internal/persistdb"
 )
 
-func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Context) (*ConnectionInfo, error) {
+func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*ConnectionInfo, error) {
 	// gets the protocol header sent by the client
 	clientHeader, err := readProtocolHeader(conn)
 	if err != nil {
 		return nil, err
 	}
 	log.Trace().Str("header", fmt.Sprintf("%x", clientHeader)).Msg("Handshake - Received")
-	protocol := (*configurations)["protocol"].(string)
-	protocolHeader, err := buildProtocolHeader(protocol)
+	protocolHeader, err := buildProtocolHeader(cfg.Protocol)
 	if err != nil {
 		msg := "error parsing protocol"
 		log.Error().Str("error", msg).Msg("Handshake error")
@@ -40,7 +40,10 @@ func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Co
 
 	/** connection.start **/
 	// send connection.start frame
-	startFrame := createConnectionStartFrame(configurations)
+	startFrame, err := createConnectionStartFrame(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if err := sendFrame(conn, startFrame); err != nil {
 		return nil, err
 	}
@@ -71,20 +74,16 @@ func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Co
 		return nil, fmt.Errorf("type assertion ConnectionStartOkFrame failed")
 	}
 
-	err = processStartOkContent(configurations, startOkFrame)
+	username, err := processStartOkContent(startOkFrame)
 	if err != nil {
 		return nil, err
 	}
 	log.Debug().Str("remote", conn.RemoteAddr().String()).Str("local", conn.LocalAddr().String()).Msg("Handshake - Started")
 
-	heartbeat, _ := (*configurations)["heartbeatInterval"].(uint16)
-	frameMax, _ := (*configurations)["frameMax"].(uint32)
-	channelMax, _ := (*configurations)["channelMax"].(uint16)
-
 	tune := &ConnectionTune{
-		ChannelMax: uint16(channelMax),
-		FrameMax:   uint32(frameMax),
-		Heartbeat:  uint16(heartbeat),
+		ChannelMax: cfg.Tuning.ChannelMax,
+		FrameMax:   cfg.Tuning.FrameMax,
+		Heartbeat:  cfg.Tuning.Heartbeat,
 	}
 	// create tune frame
 	tuneFrame := createConnectionTuneFrame(tune)
@@ -108,19 +107,33 @@ func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Co
 	if state.MethodFrame == nil {
 		return nil, fmt.Errorf("MethodFrame is empty")
 	}
-	tuneOkFrame := state.MethodFrame.Content.(*ConnectionTune)
-	if tuneOkFrame == nil {
+	tuneOkFrame, ok := state.MethodFrame.Content.(*ConnectionTune)
+	if !ok || tuneOkFrame == nil {
 		return nil, fmt.Errorf("type assertion ConnectionTuneOkFrame failed")
 	}
 
-	(*configurations)["heartbeatInterval"] = tuneOkFrame.Heartbeat
-	(*configurations)["frameMax"] = tuneOkFrame.FrameMax
-	(*configurations)["channelMax"] = tuneOkFrame.ChannelMax
+	negotiated, err := cfg.Tuning.Negotiate(*tuneOkFrame)
+	if err != nil {
+		var tuneErr *TuneError
+		if errors.As(err, &tuneErr) {
+			sendHandshakeClose(conn, tuneErr.ReplyCode, uint16(CONNECTION_TUNE_OK), tuneErr.Text)
+		}
+		return nil, err
+	}
 
-	config := NewAmqpClientConfig(configurations)
+	config := &AmqpClientConfig{
+		Username: username,
+		Protocol: cfg.Protocol,
+		SSL:      cfg.SSL,
+	}
 	connCtx, cancel := context.WithCancel(connCtx)
 	client := NewAmqpClient(conn, config, connCtx, cancel)
-	log.Debug().Msg("Connection successfully tuned")
+	client.Negotiated = negotiated
+	log.Debug().
+		Uint16("channel_max", negotiated.ChannelMax).
+		Uint32("frame_max", negotiated.FrameMax).
+		Uint16("heartbeat", negotiated.Heartbeat).
+		Msg("Connection successfully tuned")
 
 	client.StartHeartbeat()
 
@@ -149,7 +162,6 @@ func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Co
 	VHostName := openFrame.VirtualHost
 
 	// Enforce vhost membership: check that the authenticated user is allowed on this vhost.
-	username, _ := (*configurations)["username"].(string)
 	if username != "" {
 		ok, err := persistdb.HasVHostAccess(username, VHostName)
 		if err != nil || !ok {
@@ -171,32 +183,42 @@ func handshake(configurations *map[string]any, conn net.Conn, connCtx context.Co
 	return connInfo, nil
 }
 
-func processStartOkContent(configurations *map[string]any, startOkFrame *ConnectionStartOk) error {
+// sendHandshakeClose sends connection.close during the handshake. The caller
+// closes the socket right after, so the close-ok is not awaited.
+func sendHandshakeClose(conn net.Conn, replyCode ReplyCode, methodID uint16, text string) {
+	classID := uint16(0)
+	if methodID != 0 {
+		classID = uint16(CONNECTION)
+	}
+	frame := createConnectionCloseFrame(0, uint16(replyCode), classID, methodID, text)
+	if err := sendFrame(conn, frame); err != nil {
+		log.Debug().Err(err).Msg("Failed to send connection.close during handshake")
+	}
+}
+
+func processStartOkContent(startOkFrame *ConnectionStartOk) (string, error) {
 	mechanism := startOkFrame.Mechanism
 	if mechanism != "PLAIN" {
-		return fmt.Errorf("mechanism invalid or %s not suported", mechanism)
+		return "", fmt.Errorf("mechanism invalid or %s not suported", mechanism)
 	}
 	// parse username and password from startOkFrame.Response
 	log.Printf("Response: '%s'\n", startOkFrame.Response)
 	credentials := strings.Split(strings.Trim(startOkFrame.Response, " "), " ")
 	log.Debug().Str("username", credentials[0]).Msg("Credentials parsed")
 	if len(credentials) != 2 {
-		return fmt.Errorf("failed to parse credentials: invalid format")
+		return "", fmt.Errorf("failed to parse credentials: invalid format")
 	}
 	username := credentials[0]
 	password := credentials[1]
 	// ask for persistdb if user and password match
 	authOk, err := persistdb.AuthenticateUser(username, password)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !authOk {
-		return fmt.Errorf("authentication failed")
+		return "", fmt.Errorf("authentication failed")
 	}
-	// set username to configurations
-	(*configurations)["username"] = username
-
-	return nil
+	return username, nil
 }
 
 func buildProtocolHeader(protocol string) ([]byte, error) {

@@ -131,7 +131,7 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 			redelivered,
 		), append(
 			vh.framer.CreateHeaderFrame(consumer.Channel, uint16(amqp.BASIC), amqpMsg),
-			vh.framer.CreateBodyFrame(consumer.Channel, msg.Body)...)...)
+			vh.framer.CreateBodyFrame(consumer.Channel, consumer.FrameMax, msg.Body)...)...)
 
 	// if err := vh.framer.SendFrame(consumer.Connection, frames); err != nil {
 	if err := vh.frameSender.SendFrame(consumer.ConnectionID, consumer.Channel, frames); err != nil {

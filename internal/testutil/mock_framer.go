@@ -24,7 +24,7 @@ func (m *MockFramer) SendFrame(conn net.Conn, frame []byte) error {
 	return nil
 }
 
-func (m *MockFramer) Handshake(configurations *map[string]any, conn net.Conn, connCtxt context.Context) (*amqp.ConnectionInfo, error) {
+func (m *MockFramer) Handshake(cfg amqp.HandshakeConfig, conn net.Conn, connCtxt context.Context) (*amqp.ConnectionInfo, error) {
 	return nil, nil
 }
 
@@ -34,7 +34,7 @@ func (m *MockFramer) CreateHeaderFrame(channel, classID uint16, msg amqp.Message
 	return []byte("header-frame")
 }
 
-func (m *MockFramer) CreateBodyFrame(channel uint16, content []byte) []byte {
+func (m *MockFramer) CreateBodyFrame(channel uint16, frameMax uint32, content []byte) []byte {
 	return []byte("body-frame")
 }
 
