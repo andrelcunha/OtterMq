@@ -44,7 +44,7 @@ OtterMQ is configured via environment variables. All settings have sensible defa
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTTERMQ_ENABLE_WEB_API` | `true` | Enable REST API for management |
-| `OTTERMQ_ENABLE_UI` | `true` | Enable management UI (Vue/Quasar frontend) |
+| `OTTERMQ_ENABLE_UI` | `true` | Enable management UI (SvelteKit frontend, built from `web/ui`) |
 | `OTTERMQ_ENABLE_SWAGGER` | `false` | Enable Swagger API documentation at `/docs` |
 | `OTTERMQ_WEB_API_PATH` | `/api` | Base path for REST API endpoints |
 | `OTTERMQ_SWAGGER_PATH` | `/docs` | Path for Swagger UI |

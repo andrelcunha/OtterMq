@@ -304,6 +304,46 @@ func TestUnbindQueue_FanoutExchange(t *testing.T) {
 	}
 }
 
+func TestUnbindQueue_TopicExchange(t *testing.T) {
+	var options = VHostOptions{
+		QueueBufferSize: 100,
+		Persistence:     &dummy.DummyPersistence{},
+	}
+	vh := NewVhost("/", options)
+	vh.SetMetricsCollector(metrics.NewMockCollector(nil))
+
+	exchangeName := "test-topic"
+	queueName := "test-queue"
+	bindingKey := "orders.#"
+	connID := newTestConsumerConnID()
+
+	vh.CreateExchange(exchangeName, TOPIC, &ExchangeProperties{Durable: false})
+	vh.CreateQueue(queueName, &QueueProperties{Durable: false}, connID)
+	if err := vh.BindQueue(exchangeName, queueName, bindingKey, nil, connID); err != nil {
+		t.Fatalf("BindQueue failed: %v", err)
+	}
+
+	exchange := vh.Exchanges[exchangeName]
+	if len(exchange.Bindings[bindingKey]) != 1 {
+		t.Fatalf("Expected one binding for key %q, got %d", bindingKey, len(exchange.Bindings[bindingKey]))
+	}
+
+	if err := vh.UnbindQueue(exchangeName, queueName, bindingKey, nil, connID); err != nil {
+		t.Fatalf("UnbindQueue failed: %v", err)
+	}
+
+	for _, b := range exchange.Bindings[bindingKey] {
+		if b.Queue.Name == queueName {
+			t.Fatal("Expected queue to be unbound from topic exchange")
+		}
+	}
+
+	// Unbinding again must report the missing binding, like direct exchanges do.
+	if err := vh.UnbindQueue(exchangeName, queueName, bindingKey, nil, connID); err == nil {
+		t.Error("Expected an error when unbinding a binding that no longer exists")
+	}
+}
+
 // Test UnbindQueue triggers auto-delete of exchange
 func TestUnbindQueue_AutoDeleteExchange(t *testing.T) {
 	var options = VHostOptions{

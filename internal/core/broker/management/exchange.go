@@ -2,6 +2,7 @@ package management
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/ottermq/ottermq/internal/core/broker/vhost"
 	"github.com/ottermq/ottermq/internal/core/models"
@@ -17,9 +18,15 @@ func (s *Service) ListExchanges() ([]models.ExchangeDTO, error) {
 				Name:  exchange.NameOrAlias(),
 				Type:  string(exchange.Typ),
 			}
+			if exchange.Props != nil {
+				dto.Durable = exchange.Props.Durable
+				dto.AutoDelete = exchange.Props.AutoDelete
+				dto.Internal = exchange.Props.Internal
+			}
 			dtos = append(dtos, dto)
 		}
 	}
+	slices.SortStableFunc(dtos, sortExchanges)
 	return dtos, nil
 }
 
@@ -114,3 +121,8 @@ func (s *Service) exchangeToDTO(vh *vhost.VHost, exchange *vhost.Exchange) *mode
 
 	return dto
 }
+
+var sortExchanges = compareBy(
+	key(func(d models.ExchangeDTO) string { return d.VHost }),
+	key(func(d models.ExchangeDTO) string { return d.Name }),
+)

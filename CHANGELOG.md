@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Note:** Prior to establishing this CHANGELOG.md file, release notes were maintained directly in [GitHub Releases](https://github.com/ottermq/ottermq/releases). Going forward, all changes will be tracked here and synchronized with releases.
 
+## [Unreleased]
+
+### Changed
+
+- The management UI is now the SvelteKit app in `web/ui`, built as a static single-page app
+  (`make ui-build`). The Vue/Quasar UI (`ottermq_ui/`) has been removed. The web server serves
+  `index.html` for client-side routes, so reloading a page such as `/queues` works.
+- The Svelte UI reached feature parity with the old UI: creating and deleting queues and
+  exchanges, getting messages, managing bindings, publishing, managing users and vhost
+  permissions, a vhost selector, notifications and confirmations (#274).
+
+### Fixed
+
+- `queue.unbind` and `DELETE /api/bindings` on a topic exchange returned success without
+  removing the binding.
+- `GET /api/exchanges` reported every exchange as non-durable, non-auto-delete and non-internal.
+- Admin permission routes stored URL-encoded vhost names (`%2F` instead of `/`).
+- `Connection.Close` frames with an oversized reply-text length no longer panic the parser (#180).
+
 ## [v0.19.3-2]
 
 ### Fixed

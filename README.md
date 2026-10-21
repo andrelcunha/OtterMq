@@ -5,7 +5,7 @@
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/ottermq/ottermq)](https://github.com/ottermq/ottermq/pulse)
 [![GitHub issues](https://img.shields.io/github/issues/ottermq/ottermq.svg)](https://github.com/ottermq/ottermq/issues)
 
-**OtterMQ** is a high-performance message broker written in Go, inspired by RabbitMQ. It aims to provide a reliable, scalable, and easy-to-use messaging solution for distributed systems. OtterMQ is being developed with the goal of full compliance with the **AMQP 0.9.1 protocol**, ensuring compatibility with existing tools and workflows. It also features a modern management UI built with **Vue + Quasar**.
+**OtterMQ** is a high-performance message broker written in Go, inspired by RabbitMQ. It aims to provide a reliable, scalable, and easy-to-use messaging solution for distributed systems. OtterMQ is being developed with the goal of full compliance with the **AMQP 0.9.1 protocol**, ensuring compatibility with existing tools and workflows. It also features a modern management UI built with **SvelteKit**.
 
 OtterMq already supports basic interoperability with RabbitMQ clients, including:
 
@@ -32,7 +32,7 @@ The name "OtterMQ" comes from my son's nickname and is a way to honor him. He br
 - User & Permission Management (SQLite + JWT)
 - Internal Metrics (ring buffers, per-queue/channel/exchange rates)
 - Prometheus `/metrics` exporter
-- Management Interface (Vue + Quasar) with real-time charts
+- Management Interface (SvelteKit) with real-time charts
 - `ottermqadmin` CLI tool (Cobra-based)
 - Docker Support via `docker-compose`
 - RabbitMQ Client Compatibility
@@ -53,9 +53,12 @@ make build-all && make install
 # Run the broker:
 make run-dev
 
-# In another terminal, run the UI:
-cd ottermq_ui
-quasar dev
+# In another terminal, run the UI (http://localhost:5173, proxies /api to :3000):
+cd web/ui
+npm install
+npm run dev
+# If the broker's web API listens elsewhere:
+# OTTERMQ_API_URL=http://localhost:3100 npm run dev
 ```
 
 ### Production Mode (Integrated UI)

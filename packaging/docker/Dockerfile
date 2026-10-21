@@ -32,9 +32,9 @@ RUN make build
 
 # WORKDIR /ui
 
-# # copy the UI source code from the host machine folder ottermq_ui to the root of the container
-# COPY ottermq_ui ./
-# RUN npm install
+# # copy the UI source code (SvelteKit, web/ui) into the container
+# COPY web/ui ./
+# RUN npm ci
 # RUN npm run build
 
 ####################################################################
@@ -46,7 +46,7 @@ WORKDIR /app
 
 # Copy the built binaries from the builder stage
 COPY --from=go-builder /app/bin/ottermq .
-# COPY --from=node-builder /ui/dist/spa ./ui/
+# COPY --from=node-builder /ui/build ./ui/
 # Expose ports 3000 for the web admin, 5672 for the broker and 9090 for prometheus exporter
 EXPOSE 3000
 EXPOSE 5672

@@ -40,18 +40,20 @@ test-cli:
 lint:
 	@golangci-lint run
 
+UI_DIR=web/ui
+
 ui-deps:
-	@cd ottermq_ui && npm install
+	@cd $(UI_DIR) && npm ci
 
 ui-build: ui-deps
-	@cd ottermq_ui && npx quasar build
+	@cd $(UI_DIR) && npm run build
 	@rm -rf ui
-	@cp -r ottermq_ui/dist/spa ui
+	@cp -r $(UI_DIR)/build ui
 
 build-all: ui-build build build-admin
 
 run-dev: build
-	@echo "UI running separately at http://localhost:9000"
+	@echo "Run the UI dev server separately: cd $(UI_DIR) && npm run dev (http://localhost:5173)"
 	@echo "Starting broker..."
 	@./$(BUILD_DIR)/$(BINARY_NAME)
 
@@ -59,6 +61,6 @@ clean:
 	@rm -f $(BUILD_DIR)/$(BINARY_NAME)
 	@rm -f $(BUILD_DIR)/$(ADMIN_BINARY_NAME)
 	@rm -rf ./ui
-	@rm -rf ./ottermq_ui/dist
+	@rm -rf ./$(UI_DIR)/build
 
 .PHONY: build build-admin install install-admin clean run docs test test-cli lint ui-deps ui-build build-all run-dev

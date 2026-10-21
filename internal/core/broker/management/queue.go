@@ -2,6 +2,7 @@ package management
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/ottermq/ottermq/internal/core/broker/vhost"
 	"github.com/ottermq/ottermq/internal/core/models"
@@ -19,6 +20,7 @@ func (s *Service) ListQueues() []models.QueueDTO {
 			dtos = append(dtos, dto)
 		}
 	}
+	slices.SortStableFunc(dtos, sortQueues)
 	return dtos
 }
 
@@ -277,3 +279,8 @@ func toUint8Pointer(val any) *uint8 {
 	}
 	return nil
 }
+
+var sortQueues = compareBy(
+	key(func(d models.QueueDTO) string { return d.VHost }),
+	key(func(d models.QueueDTO) string { return d.Name }),
+)
