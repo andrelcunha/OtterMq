@@ -154,6 +154,7 @@ func TestDecodeTable_RejectsTruncatedFields(t *testing.T) {
 	}{
 		{"short string body", []byte{1, 'a', 's', 10, 'x'}},
 		{"long string body", []byte{1, 'a', 'S', 0, 0, 0, 9, 'x', 'y'}},
+		{"long long int body", []byte{1, 'a', 'L', 0, 0, 0, 1}},
 		{"field name", []byte{5, 'a'}},
 		// Nested table that declares 6 bytes and carries 5: the short read is
 		// padded with NUL, and the padding is absorbed by the inner long-ish
@@ -222,6 +223,7 @@ func TestDecodeTable_AcceptsCompleteFields(t *testing.T) {
 		{"multi byte field name", []byte{3, 'f', 'o', 'o', 's', 1, 'x'}, map[string]interface{}{"foo": "x"}},
 		{"nested table", []byte{1, 'a', 'F', 0, 0, 0, 5, 1, 'b', 's', 1, 'y'}, map[string]interface{}{"a": map[string]interface{}{"b": "y"}}},
 		{"array", []byte{1, 'a', 'A', 0, 0, 0, 3, 's', 1, 'z'}, map[string]interface{}{"a": []interface{}{"z"}}},
+		{"long long int", []byte{1, 'a', 'L', 0, 0, 0, 0, 0, 0, 0, 42}, map[string]interface{}{"a": int64(42)}},
 	}
 
 	for _, tt := range tests {
