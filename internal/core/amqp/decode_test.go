@@ -372,6 +372,9 @@ func TestDecodeStr_AcceptsCompleteInput(t *testing.T) {
 // FuzzDecodeTable decodes arbitrary input as a field table and as an array.
 // Neither may panic, and neither may allocate much more than the input could
 // hold: a declared length is never allocated before its bytes are present.
+// Every nested table or array copies the rest of its body, at most the whole
+// input per level, and a level takes at least 5 bytes, so valid nesting may
+// allocate up to len²/5 on top of the per-byte overhead.
 func FuzzDecodeTable(f *testing.F) {
 	seeds := [][]byte{
 		{1, 'a', 's', 10, 'x'},
@@ -384,18 +387,30 @@ func FuzzDecodeTable(f *testing.F) {
 		{1, 'a', 'A', 0, 0, 0, 3, 's', 1, 'z'},
 		{'A', 0, 0, 0, 3, 's', 1, 'z'},
 		{1, 'a', 'A', 4, 0, 0, 0, 'x', 'y', 'z'}, // declares 64 MiB
+		nestedArrays(3000),
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		limit := uint64(1<<20 + 512*len(data))
-		if n := allocatedPerCall(1, func() { _, _ = DecodeTable(data) }); n > limit {
-			t.Errorf("DecodeTable allocated %d bytes for %d bytes of input", n, len(data))
+		n := uint64(len(data))
+		limit := 1<<20 + 512*n + n*n/5
+		if got := allocatedPerCall(1, func() { _, _ = DecodeTable(data) }); got > limit {
+			t.Errorf("DecodeTable allocated %d bytes for %d bytes of input", got, n)
 		}
-		if n := allocatedPerCall(1, func() { _, _ = DecodeArray(data) }); n > limit {
-			t.Errorf("DecodeArray allocated %d bytes for %d bytes of input", n, len(data))
+		if got := allocatedPerCall(1, func() { _, _ = DecodeArray(data) }); got > limit {
+			t.Errorf("DecodeArray allocated %d bytes for %d bytes of input", got, n)
 		}
 	})
+}
+
+// nestedArrays returns levels arrays nested inside each other, each with a
+// correct length, around an empty innermost array.
+func nestedArrays(levels int) []byte {
+	data := []byte{'A', 0, 0, 0, 0}
+	for i := 1; i < levels; i++ {
+		data = append(append([]byte{'A'}, binary.BigEndian.AppendUint32(nil, uint32(len(data)))...), data...)
+	}
+	return data
 }
