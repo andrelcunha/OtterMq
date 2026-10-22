@@ -288,6 +288,39 @@ func allocatedPerCall(n int, f func()) uint64 {
 	return (after.TotalAlloc - before.TotalAlloc) / uint64(n)
 }
 
+// Nested tables and arrays are decoded in place, so decoding deep but valid
+// nesting allocates in proportion to the input, not to the input times the
+// depth. 3000 levels is about 15 KB of input; copying the rest of the body at
+// every level would allocate over 20 MB.
+func TestDecode_NestedValuesAllocateLinearly(t *testing.T) {
+	const levels = 3000
+	table := func(data []byte) error { _, err := DecodeTable(data); return err }
+	array := func(data []byte) error { _, err := DecodeArray(data); return err }
+
+	tests := []struct {
+		name   string
+		data   []byte
+		decode func([]byte) error
+	}{
+		{"arrays in arrays", nestedArrays(levels), array},
+		{"tables in tables", nestedTables(levels), table},
+		{"tables and arrays alternating", nestedMixed(levels), table},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			allocated := allocatedPerCall(1, func() { err = tt.decode(tt.data) })
+			if err != nil {
+				t.Fatalf("decode failed: %v", err)
+			}
+			if limit := uint64(128 * len(tt.data)); allocated >= limit {
+				t.Errorf("decode allocated %d bytes for %d bytes of input, want under %d", allocated, len(tt.data), limit)
+			}
+		})
+	}
+}
+
 // Control cases: fields whose declared length matches the bytes present still
 // decode, so the truncation check cannot be satisfied by rejecting everything.
 func TestDecodeTable_AcceptsCompleteFields(t *testing.T) {
@@ -411,6 +444,32 @@ func nestedArrays(levels int) []byte {
 	data := []byte{'A', 0, 0, 0, 0}
 	for i := 1; i < levels; i++ {
 		data = append(append([]byte{'A'}, binary.BigEndian.AppendUint32(nil, uint32(len(data)))...), data...)
+	}
+	return data
+}
+
+// nestedTables returns levels field tables nested inside each other, each
+// holding one field "a" with the next table, around an empty innermost table.
+func nestedTables(levels int) []byte {
+	var data []byte
+	for i := 1; i < levels; i++ {
+		data = append(append([]byte{1, 'a', 'F'}, binary.BigEndian.AppendUint32(nil, uint32(len(data)))...), data...)
+	}
+	return data
+}
+
+// nestedMixed returns levels values nested inside each other, alternating
+// between a table holding an array and an array holding a table. The
+// outermost value is a table.
+func nestedMixed(levels int) []byte {
+	var data []byte // innermost: an empty array body
+	for i := 1; i < levels; i++ {
+		length := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+		if i%2 == 1 {
+			data = append(append([]byte{1, 'a', 'A'}, length...), data...) // table holding an array
+		} else {
+			data = append(append([]byte{'F'}, length...), data...) // array holding a table
+		}
 	}
 	return data
 }

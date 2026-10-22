@@ -29,6 +29,22 @@ func readN(buf *bytes.Reader, n uint32) ([]byte, error) {
 	return data, nil
 }
 
+// sliceN returns the next n bytes of data, which buf reads, and advances buf past
+// them. Nested tables and arrays are decoded from these sub-slices instead of
+// copies: a copy per level would make memory grow with the square of the depth.
+// Decoded values never alias data, since strings are always copied out of it.
+func sliceN(data []byte, buf *bytes.Reader, n uint32) ([]byte, error) {
+	if int64(n) > int64(buf.Len()) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	start := len(data) - buf.Len()
+	end := start + int(n)
+	if _, err := buf.Seek(int64(n), io.SeekCurrent); err != nil {
+		return nil, err
+	}
+	return data[start:end:end], nil
+}
+
 // decodeTable decodes an AMQP field table from a byte slice
 func DecodeTable(data []byte) (map[string]interface{}, error) {
 
@@ -169,7 +185,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 				return nil, err
 			}
 
-			arrayData, err := readN(buf, arrayLength)
+			arrayData, err := sliceN(data, buf, arrayLength)
 			if err != nil {
 				return nil, err
 			}
@@ -194,7 +210,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 				return nil, err
 			}
 
-			strValue, err := readN(buf, strLength)
+			strValue, err := sliceN(data, buf, strLength)
 			if err != nil {
 				return nil, err
 			}
@@ -326,7 +342,7 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 			if err := binary.Read(buf, binary.BigEndian, &tableLength); err != nil {
 				return nil, err
 			}
-			tableData, err := readN(buf, tableLength)
+			tableData, err := sliceN(data, buf, tableLength)
 			if err != nil {
 				return nil, err
 			}
@@ -341,7 +357,7 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 			if err := binary.Read(buf, binary.BigEndian, &arrayLength); err != nil {
 				return nil, err
 			}
-			arrayData, err := readN(buf, arrayLength)
+			arrayData, err := sliceN(data, buf, arrayLength)
 			if err != nil {
 				return nil, err
 			}
