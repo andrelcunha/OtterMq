@@ -368,3 +368,34 @@ func TestDecodeStr_AcceptsCompleteInput(t *testing.T) {
 		t.Errorf("DecodeLongStr with zero length = %q, want an empty string", got)
 	}
 }
+
+// FuzzDecodeTable decodes arbitrary input as a field table and as an array.
+// Neither may panic, and neither may allocate much more than the input could
+// hold: a declared length is never allocated before its bytes are present.
+func FuzzDecodeTable(f *testing.F) {
+	seeds := [][]byte{
+		{1, 'a', 's', 10, 'x'},
+		{1, 'a', 'S', 0, 0, 0, 9, 'x', 'y'},
+		{1, 'a', 'L', 0, 0, 0, 1},
+		{5, 'a'},
+		{1, 'a', 'F', 0, 0, 0, 6, 1, 'b', 's', 3, 'y'},
+		{1, 'a', 'A', 0, 0, 0, 6, 's', 5, 'x'},
+		{1, 'a', 'F', 0, 0, 0, 5, 1, 'b', 's', 1, 'y'},
+		{1, 'a', 'A', 0, 0, 0, 3, 's', 1, 'z'},
+		{'A', 0, 0, 0, 3, 's', 1, 'z'},
+		{1, 'a', 'A', 4, 0, 0, 0, 'x', 'y', 'z'}, // declares 64 MiB
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		limit := uint64(1<<20 + 512*len(data))
+		if n := allocatedPerCall(1, func() { _, _ = DecodeTable(data) }); n > limit {
+			t.Errorf("DecodeTable allocated %d bytes for %d bytes of input", n, len(data))
+		}
+		if n := allocatedPerCall(1, func() { _, _ = DecodeArray(data) }); n > limit {
+			t.Errorf("DecodeArray allocated %d bytes for %d bytes of input", n, len(data))
+		}
+	})
+}
