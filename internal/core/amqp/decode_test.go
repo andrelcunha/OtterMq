@@ -424,10 +424,8 @@ func TestDecodeStr_AcceptsCompleteInput(t *testing.T) {
 
 // FuzzDecodeTable decodes arbitrary input as a field table and as an array.
 // Neither may panic, and neither may allocate much more than the input could
-// hold: a declared length is never allocated before its bytes are present.
-// Every nested table or array copies the rest of its body, at most the whole
-// input per level, and a level takes at least 5 bytes, so valid nesting may
-// allocate up to len²/5 on top of the per-byte overhead.
+// hold: a declared length is never allocated before its bytes are present, and
+// nested values are decoded in place, so allocation stays linear in the input.
 func FuzzDecodeTable(f *testing.F) {
 	seeds := [][]byte{
 		{1, 'a', 's', 10, 'x'},
@@ -441,6 +439,7 @@ func FuzzDecodeTable(f *testing.F) {
 		{'A', 0, 0, 0, 3, 's', 1, 'z'},
 		{1, 'a', 'A', 4, 0, 0, 0, 'x', 'y', 'z'}, // declares 64 MiB
 		nestedArrays(3000),
+		nestedMixed(3000, []byte{'Z'}), // fails at the innermost level
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
@@ -448,7 +447,7 @@ func FuzzDecodeTable(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		n := uint64(len(data))
-		limit := 1<<20 + 512*n + n*n/5
+		limit := 1<<20 + 512*n
 		if got := allocatedPerCall(1, func() { _, _ = DecodeTable(data) }); got > limit {
 			t.Errorf("DecodeTable allocated %d bytes for %d bytes of input", got, n)
 		}
