@@ -2,7 +2,9 @@ package amqp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -207,6 +209,83 @@ func TestDecodeLongStr_RejectsTruncatedInput(t *testing.T) {
 	if got, err := DecodeLongStr(bytes.NewReader([]byte{0, 0, 0, 9, 'x', 'y'})); err == nil {
 		t.Fatalf("DecodeLongStr = %q, want an error for a truncated string", got)
 	}
+}
+
+// A declared length larger than the rest of the frame is rejected before the
+// field body is allocated. The large cases declare 64 MiB, far more than the
+// few bytes that follow, so allocating it would show up in TotalAlloc. Short
+// strings can declare at most 255 bytes, less than the decoder's own overhead,
+// so those cases compare a declared 255 with a declared 4 (also more than is
+// present) over many calls: the difference must stay below half of 255.
+func TestDecode_OversizedLengthIsNotAllocated(t *testing.T) {
+	const large = 64 << 20
+	be32 := func(n uint32) []byte { return binary.BigEndian.AppendUint32(nil, n) }
+	cat := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
+	body := []byte("xyz")
+
+	table := func(data []byte) error { _, err := DecodeTable(data); return err }
+	array := func(data []byte) error { _, err := DecodeArray(data); return err }
+	longStr := func(data []byte) error { _, err := DecodeLongStr(bytes.NewReader(data)); return err }
+	shortStr := func(data []byte) error { _, err := DecodeShortStr(bytes.NewReader(data)); return err }
+
+	tests := []struct {
+		name     string
+		declared uint32
+		input    func(n uint32) []byte
+		decode   func([]byte) error
+	}{
+		{"table array field", large, func(n uint32) []byte { return cat([]byte{1, 'a', 'A'}, be32(n), body) }, table},
+		{"table long string field", large, func(n uint32) []byte { return cat([]byte{1, 'a', 'S'}, be32(n), body) }, table},
+		{"table nested table field", large, func(n uint32) []byte { return cat([]byte{1, 'a', 'F'}, be32(n), body) }, table},
+		{"array nested table", large, func(n uint32) []byte { return cat([]byte{'F'}, be32(n), body) }, array},
+		{"array nested array", large, func(n uint32) []byte { return cat([]byte{'A'}, be32(n), body) }, array},
+		{"long string", large, func(n uint32) []byte { return cat(be32(n), body) }, longStr},
+		{"table field name", 255, func(n uint32) []byte { return cat([]byte{byte(n)}, body) }, table},
+		{"table short string field", 255, func(n uint32) []byte { return cat([]byte{1, 'a', 's', byte(n)}, body) }, table},
+		{"short string", 255, func(n uint32) []byte { return cat([]byte{byte(n)}, body) }, shortStr},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := tt.input(tt.declared)
+			var err error
+			measure := func(calls int, data []byte) uint64 {
+				return allocatedPerCall(calls, func() { err = tt.decode(data) })
+			}
+
+			var extra, limit uint64
+			if tt.declared >= 1<<20 {
+				extra, limit = measure(1, data), 1<<20
+			} else {
+				baseline := measure(1000, tt.input(uint32(len(body)+1)))
+				if extra = measure(1000, data); extra > baseline {
+					extra -= baseline
+				} else {
+					extra = 0
+				}
+				limit = uint64(tt.declared / 2)
+			}
+
+			if err == nil {
+				t.Fatalf("decode succeeded, want an error for a length of %d with %d bytes present", tt.declared, len(body))
+			}
+			if extra >= limit {
+				t.Errorf("decode allocated %d bytes per call for a declared length of %d, want under %d", extra, tt.declared, limit)
+			}
+		})
+	}
+}
+
+// allocatedPerCall returns the bytes allocated per call of f, averaged over n calls.
+func allocatedPerCall(n int, f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := 0; i < n; i++ {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	return (after.TotalAlloc - before.TotalAlloc) / uint64(n)
 }
 
 // Control cases: fields whose declared length matches the bytes present still

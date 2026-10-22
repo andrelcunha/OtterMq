@@ -15,6 +15,20 @@ import (
 // that declares more bytes than it carries would otherwise be accepted with the
 // remainder zero-padded.
 
+// readN reads a length-prefixed field body of n bytes. The length comes from the
+// wire, so it is checked against the bytes left in buf before anything is
+// allocated: a field can never be longer than the frame that carries it.
+func readN(buf *bytes.Reader, n uint32) ([]byte, error) {
+	if int64(n) > int64(buf.Len()) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	data := make([]byte, n)
+	if _, err := io.ReadFull(buf, data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // decodeTable decodes an AMQP field table from a byte slice
 func DecodeTable(data []byte) (map[string]interface{}, error) {
 
@@ -28,8 +42,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 			return nil, err
 		}
 
-		fieldName := make([]byte, fieldNameLength)
-		_, err = io.ReadFull(buf, fieldName)
+		fieldName, err := readN(buf, uint32(fieldNameLength))
 		if err != nil {
 			return nil, err
 		}
@@ -156,8 +169,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 				return nil, err
 			}
 
-			arrayData := make([]byte, arrayLength)
-			_, err := io.ReadFull(buf, arrayData)
+			arrayData, err := readN(buf, arrayLength)
 			if err != nil {
 				return nil, err
 			}
@@ -182,8 +194,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 				return nil, err
 			}
 
-			strValue := make([]byte, strLength)
-			_, err := io.ReadFull(buf, strValue)
+			strValue, err := readN(buf, strLength)
 			if err != nil {
 				return nil, err
 			}
@@ -315,8 +326,8 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 			if err := binary.Read(buf, binary.BigEndian, &tableLength); err != nil {
 				return nil, err
 			}
-			tableData := make([]byte, tableLength)
-			if _, err := io.ReadFull(buf, tableData); err != nil {
+			tableData, err := readN(buf, tableLength)
+			if err != nil {
 				return nil, err
 			}
 			value, err := DecodeTable(tableData)
@@ -330,8 +341,8 @@ func DecodeArray(data []byte) ([]interface{}, error) {
 			if err := binary.Read(buf, binary.BigEndian, &arrayLength); err != nil {
 				return nil, err
 			}
-			arrayData := make([]byte, arrayLength)
-			if _, err := io.ReadFull(buf, arrayData); err != nil {
+			arrayData, err := readN(buf, arrayLength)
+			if err != nil {
 				return nil, err
 			}
 			value, err := DecodeArray(arrayData)
@@ -379,8 +390,7 @@ func DecodeLongStr(buf *bytes.Reader) (string, error) {
 		return "", nil
 	}
 
-	strData := make([]byte, strLen)
-	_, err = io.ReadFull(buf, strData)
+	strData, err := readN(buf, strLen)
 	if err != nil {
 		return "", err
 	}
@@ -395,8 +405,7 @@ func DecodeShortStr(buf *bytes.Reader) (string, error) {
 		return "", err
 	}
 
-	strData := make([]byte, strLen)
-	_, err = io.ReadFull(buf, strData)
+	strData, err := readN(buf, uint32(strLen))
 	if err != nil {
 		return "", err
 	}

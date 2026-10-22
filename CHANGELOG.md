@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Field values whose declared length exceeds the frame are now rejected before any memory is
+  allocated for them.
+
 ## [v0.21.0]
 
 > **Not production-ready.** OtterMQ is pre-1.0. This release fixes several crashes that a client

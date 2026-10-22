@@ -2,9 +2,12 @@ package amqp
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -460,5 +463,72 @@ func TestFrameMaxSizeCompliance(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A connection.start-ok whose client properties hold a field declaring far
+// more bytes than the frame carries fails the handshake, and the declared
+// length is never allocated.
+func TestHandshake_StartOkOversizedFieldIsNotAllocated(t *testing.T) {
+	const declared = 64 << 20
+	cfg := HandshakeConfig{
+		Protocol:   "AMQP 0-9-1",
+		Mechanisms: []string{"PLAIN"},
+		Locales:    []string{"en_US"},
+		Tuning:     NewServerTuning(0, 0, 0),
+	}
+
+	longStr := func(b []byte) []byte { return append(binary.BigEndian.AppendUint32(nil, uint32(len(b))), b...) }
+	shortStr := func(s string) []byte { return append([]byte{byte(len(s))}, s...) }
+
+	props := append([]byte{7, 'p', 'r', 'o', 'd', 'u', 'c', 't', 'S'}, binary.BigEndian.AppendUint32(nil, declared)...)
+	props = append(props, "xyz"...)
+	payload := binary.BigEndian.AppendUint16(nil, uint16(CONNECTION))
+	payload = binary.BigEndian.AppendUint16(payload, 11) // start-ok
+	payload = append(payload, longStr(props)...)
+	payload = append(payload, shortStr("PLAIN")...)
+	payload = append(payload, longStr([]byte("\x00guest\x00guest"))...)
+	payload = append(payload, shortStr("en_US")...)
+	frame := append([]byte{byte(TYPE_METHOD), 0, 0}, binary.BigEndian.AppendUint32(nil, uint32(len(payload)))...)
+	frame = append(frame, payload...)
+	frame = append(frame, FRAME_END)
+
+	header, err := buildProtocolHeader(cfg.Protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var hsErr error
+	allocated := allocatedPerCall(1, func() {
+		server, client := net.Pipe()
+		defer client.Close()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, hsErr = handshake(cfg, server, context.Background())
+			server.Close()
+		}()
+
+		if _, err := client.Write(header); err != nil {
+			t.Errorf("write protocol header: %v", err)
+			return
+		}
+		if _, err := readFrame(client, cfg.Tuning.FrameMax); err != nil {
+			t.Errorf("read connection.start: %v", err)
+			return
+		}
+		if _, err := client.Write(frame); err != nil {
+			t.Errorf("write connection.start-ok: %v", err)
+			return
+		}
+		_, _ = io.Copy(io.Discard, client) // until the server closes
+		<-done
+	})
+
+	if hsErr == nil || !strings.Contains(hsErr.Error(), "client properties") {
+		t.Fatalf("handshake error = %v, want a client properties decode error", hsErr)
+	}
+	if allocated >= 1<<20 {
+		t.Errorf("handshake allocated %d bytes for a field declaring %d, want under %d", allocated, declared, 1<<20)
 	}
 }
