@@ -193,7 +193,7 @@ func DecodeTable(data []byte) (map[string]interface{}, error) {
 			// Decode the array data into []interface{}
 			decodedArray, err := DecodeArray(arrayData)
 			if err != nil {
-				return nil, fmt.Errorf("failed to decode array: %v", err)
+				return nil, err
 			}
 			table[string(fieldName)] = decodedArray
 

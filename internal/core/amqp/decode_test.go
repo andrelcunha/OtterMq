@@ -304,7 +304,7 @@ func TestDecode_NestedValuesAllocateLinearly(t *testing.T) {
 	}{
 		{"arrays in arrays", nestedArrays(levels), array},
 		{"tables in tables", nestedTables(levels), table},
-		{"tables and arrays alternating", nestedMixed(levels), table},
+		{"tables and arrays alternating", nestedMixed(levels, nil), table},
 	}
 
 	for _, tt := range tests {
@@ -318,6 +318,26 @@ func TestDecode_NestedValuesAllocateLinearly(t *testing.T) {
 				t.Errorf("decode allocated %d bytes for %d bytes of input, want under %d", allocated, len(tt.data), limit)
 			}
 		})
+	}
+}
+
+// An error deep inside nested values is returned as it is, not wrapped once per
+// level: wrapping copies the growing message at every level, so both the
+// message and the memory spent building it would grow with the square of the
+// depth.
+func TestDecode_NestedErrorIsNotWrappedPerLevel(t *testing.T) {
+	data := nestedMixed(3000, []byte{'Z'}) // invalid element in the innermost array
+
+	var err error
+	allocated := allocatedPerCall(1, func() { _, err = DecodeTable(data) })
+	if err == nil {
+		t.Fatal("DecodeTable succeeded, want an error for the invalid innermost element")
+	}
+	if len(err.Error()) > 256 {
+		t.Errorf("error message is %d bytes long, want a short message: %.80s...", len(err.Error()), err.Error())
+	}
+	if limit := uint64(128 * len(data)); allocated >= limit {
+		t.Errorf("DecodeTable allocated %d bytes for %d bytes of input, want under %d", allocated, len(data), limit)
 	}
 }
 
@@ -459,10 +479,10 @@ func nestedTables(levels int) []byte {
 }
 
 // nestedMixed returns levels values nested inside each other, alternating
-// between a table holding an array and an array holding a table. The
-// outermost value is a table.
-func nestedMixed(levels int) []byte {
-	var data []byte // innermost: an empty array body
+// between a table holding an array and an array holding a table, around the
+// innermost array body inner. The outermost value is a table.
+func nestedMixed(levels int, inner []byte) []byte {
+	data := inner
 	for i := 1; i < levels; i++ {
 		length := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
 		if i%2 == 1 {
