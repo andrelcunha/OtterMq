@@ -8,9 +8,9 @@ import (
 	"github.com/ottermq/ottermq/internal/testutil"
 )
 
-// cancelOnSendFrameSender simulates basic.cancel of the last consumer
-// arriving while the delivery loop is sending a message: CancelConsumer
-// stops the loop, so its context is cancelled mid-delivery.
+// cancelOnSendFrameSender simulates the delivery loop being stopped (the
+// queue is deleted) while it is sending a message: its context is cancelled
+// mid-delivery.
 type cancelOnSendFrameSender struct {
 	cancel context.CancelFunc
 }
@@ -64,7 +64,7 @@ func TestDeliveryLoopStoppedMidDeliveryDoesNotRequeueDeliveredMessage(t *testing
 	vh, q, connID := newQueueWithStoppedLoop(t, ctx, &cancelOnSendFrameSender{cancel: cancel})
 
 	q.Push(Message{ID: "m1", Body: []byte("x")})
-	q.deliverFromFIFOQueue(vh)
+	q.deliverFromFIFOQueue(vh, nil)
 
 	if n := q.Len(); n != 0 {
 		t.Errorf("queue holds %d messages after the delivery, want 0 (the delivered message was pushed back)", n)
@@ -91,7 +91,7 @@ func TestDeliveryLoopStoppingWithoutConsumersRequeuesMessage(t *testing.T) {
 	q.deliveryCtx = ctx
 	cancel()
 
-	if handled := q.deliverMessage(vh, Message{ID: "m1", Body: []byte("x")}); handled {
+	if handled := q.deliverMessage(vh, Message{ID: "m1", Body: []byte("x")}, nil); handled {
 		t.Fatal("deliverMessage reported a message it could not deliver as handled")
 	}
 	if !requeueOnShutdown(q, Message{ID: "m1", Body: []byte("x")}, false) {

@@ -170,28 +170,47 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 		consumer,
 	)
 	vh.collector.RecordConsumerAdded(consumer.QueueName)
-	// Check if we need to start delivery routine
 	queue := vh.Queues[consumer.QueueName]
-	shouldStartDelivery := len(vh.ConsumersByQueue[queue.Name]) == 1
-
-	// Release the lock BEFORE starting the delivery loop to avoid deadlock
-	// The delivery loop may need to acquire locks on both vh and queue
+	queue.consumers.Store(int32(len(vh.ConsumersByQueue[consumer.QueueName])))
 	vh.mu.Unlock()
 
-	// start delivery routine if not already running
-	if shouldStartDelivery {
-		go queue.startDeliveryLoop(vh)
-	}
+	// The loop is started once and then lives as long as the queue; if it is
+	// already running (possibly idle, with no consumers), wake it up.
+	queue.startDeliveryLoop(vh)
+	queue.notifyConsumersChanged()
 
 	return consumer.Tag, nil
 }
 
 func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
+	return vh.cancelConsumer(channel, tag, nil)
+}
+
+// removeFailedConsumer cancels a consumer whose delivery failed; it runs on
+// q's delivery goroutine. It does nothing if, by the time it holds vh.mu, q
+// was deleted (the name may now belong to a recreated queue) or the
+// consumer's key was reused.
+func (vh *VHost) removeFailedConsumer(q *Queue, consumer *Consumer) error {
+	key := ConsumerKey{consumer.Channel, consumer.Tag}
+	return vh.cancelConsumer(consumer.Channel, consumer.Tag, func() bool {
+		return vh.Queues[q.Name] == q && vh.Consumers[key] == consumer
+	})
+}
+
+// cancelConsumer removes a consumer. The queue's delivery loop keeps running
+// (it idles without consumers). If guard is set, it is checked with vh.mu
+// held and the cancel is skipped when it returns false. The consumer's
+// unacked messages are requeued after vh.mu is released.
+func (vh *VHost) cancelConsumer(channel uint16, tag string, guard func() bool) error {
 	key := ConsumerKey{channel, tag}
 	vh.mu.Lock()
-	defer vh.mu.Unlock()
+	if guard != nil && !guard() {
+		vh.mu.Unlock()
+		return nil
+	}
 	consumer, exists := vh.Consumers[key]
 	if !exists {
+		vh.mu.Unlock()
 		return errors.NewChannelError(
 			fmt.Sprintf("no consumer '%s' on channel %d", tag, channel),
 			uint16(amqp.NOT_FOUND),
@@ -199,32 +218,79 @@ func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
 			uint16(amqp.BASIC_CANCEL),
 		)
 	}
+	work := vh.cancelConsumerLocked(key, consumer)
+	vh.mu.Unlock()
 
+	vh.requeue(work)
+	return nil
+}
+
+// requeueWork is a batch of messages to push back onto a queue once vh.mu
+// is released.
+type requeueWork struct {
+	queue       *Queue
+	records     []*DeliveryRecord
+	redelivered bool // mark the messages so their next delivery sets redelivered
+}
+
+// requeue pushes back the collected messages. It must be called without
+// vh.mu: Push can enforce x-max-length and dead-letter the evicted messages,
+// which publishes and takes vh.mu.
+func (vh *VHost) requeue(work []requeueWork) {
+	for _, w := range work {
+		for _, record := range w.records {
+			if w.redelivered {
+				vh.markAsRedelivered(record.Message.ID)
+			}
+			w.queue.Push(record.Message)
+			vh.collector.RecordQueueRequeue(w.queue.Name)
+		}
+	}
+}
+
+// cancelConsumerLocked removes the consumer from every index, takes its
+// unacked deliveries and deletes its queue if that was the last consumer of
+// an auto-delete queue. The caller holds vh.mu and must pass the returned
+// work to requeue after releasing it.
+func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []requeueWork {
 	consumer.Active.Store(false)
 	delete(vh.Consumers, key)
 
-	// Requeue unacked messages for this consumer
+	var work []requeueWork
 	channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
 	if state := vh.ChannelDeliveries[channelKey]; state != nil {
-		vh.requeueUnackedForConsumer(state, consumer.Tag, consumer.QueueName)
+		records := takeUnackedForConsumer(state, consumer.Tag)
+		if len(records) > 0 {
+			if queue, ok := vh.Queues[consumer.QueueName]; ok {
+				log.Debug().
+					Str("consumer", consumer.Tag).
+					Str("queue", consumer.QueueName).
+					Int("count", len(records)).
+					Msg("Requeuing unacked messages for canceled consumer")
+				work = append(work, requeueWork{queue: queue, records: records, redelivered: true})
+			} else {
+				log.Warn().
+					Str("consumer", consumer.Tag).
+					Str("queue", consumer.QueueName).
+					Int("count", len(records)).
+					Msg("Cannot requeue unacked messages: queue not found")
+			}
+		}
 	}
 
 	// Remove from ConsumersByQueue
 	consumersForQueue := vh.ConsumersByQueue[consumer.QueueName]
 	for i, c := range consumersForQueue {
-		if c.Tag == tag && c.Channel == channel {
+		if c.Tag == key.Tag && c.Channel == key.Channel {
 			vh.ConsumersByQueue[consumer.QueueName] = append(consumersForQueue[:i], consumersForQueue[i+1:]...)
 			vh.collector.RecordConsumerRemoved(consumer.QueueName)
 			break
 		}
 	}
-	if len(vh.ConsumersByQueue[consumer.QueueName]) == 0 {
-		queue, exists := vh.Queues[consumer.QueueName]
-		if exists {
-			vh.mu.Unlock()
-			queue.stopDeliveryLoop()
-			vh.mu.Lock()
-
+	if queue, exists := vh.Queues[consumer.QueueName]; exists {
+		queue.consumers.Store(int32(len(vh.ConsumersByQueue[consumer.QueueName])))
+		queue.notifyConsumersChanged()
+		if len(vh.ConsumersByQueue[consumer.QueueName]) == 0 {
 			// verify if the queue can be auto-deleted
 			if deleted, err := vh.checkAutoDeleteQueueUnlocked(queue.Name); err != nil {
 				log.Printf("Failed to check auto-delete queue: %v", err)
@@ -235,71 +301,33 @@ func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
 	}
 
 	// Remove from ConsumersByChannel (connection-scoped)
-	channelKey = ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
 	consumersForChannel := vh.ConsumersByChannel[channelKey]
 	for i, c := range consumersForChannel {
-		if c.Tag == tag {
+		if c.Tag == key.Tag {
 			vh.ConsumersByChannel[channelKey] = append(consumersForChannel[:i], consumersForChannel[i+1:]...)
 			break
 		}
 	}
-
-	return nil
+	return work
 }
 
-// requeueUnackedForConsumer requeues all unacked messages for a specific consumer.
-// This is called when a consumer is canceled per AMQP spec.
-// The caller MUST hold vh.mu for the entire duration of this function, including after state.mu is released,
-// because vh.Queues is accessed after state.mu is unlocked.
-func (vh *VHost) requeueUnackedForConsumer(state *ChannelDeliveryState, consumerTag, queueName string) {
+// takeUnackedForConsumer removes a consumer's unacked deliveries from the
+// channel state and returns them.
+func takeUnackedForConsumer(state *ChannelDeliveryState, consumerTag string) []*DeliveryRecord {
 	state.mu.Lock()
+	defer state.mu.Unlock()
 
 	consumerUnacked := state.UnackedByConsumer[consumerTag]
 	if len(consumerUnacked) == 0 {
-		state.mu.Unlock()
-		return // No unacked messages for this consumer
+		return nil
 	}
-
-	// retrieve from nested index
 	delete(state.UnackedByConsumer, consumerTag)
-
-	// Remove from flat index
-	for deliveryTag := range consumerUnacked {
+	records := make([]*DeliveryRecord, 0, len(consumerUnacked))
+	for deliveryTag, record := range consumerUnacked {
 		delete(state.UnackedByTag, deliveryTag)
+		records = append(records, record)
 	}
-
-	// Copy recordsToRequeue for processing outside lock
-	recordsToRequeue := make([]*DeliveryRecord, 0, len(consumerUnacked))
-	for _, record := range consumerUnacked {
-		recordsToRequeue = append(recordsToRequeue, record)
-	}
-	state.mu.Unlock()
-
-	// Requeue messages (outside state lock to avoid deadlock with queue.Push)
-	queue, exists := vh.Queues[queueName]
-	if !exists {
-		log.Warn().
-			Str("consumer", consumerTag).
-			Str("queue", queueName).
-			Int("count", len(recordsToRequeue)).
-			Msg("Cannot requeue unacked messages: queue not found")
-		return
-	}
-
-	log.Debug().
-		Str("consumer", consumerTag).
-		Str("queue", queueName).
-		Int("count", len(recordsToRequeue)).
-		Msg("Requeuing unacked messages for canceled consumer")
-
-	for _, record := range recordsToRequeue {
-		// Mark as redelivered for next delivery
-		vh.markAsRedelivered(record.Message.ID)
-
-		// requeue to original queue
-		queue.Push(record.Message)
-		vh.collector.RecordQueueRequeue(queue.Name)
-	}
+	return records
 }
 
 // checkAutoDeleteQueueUnlocked checks if a queue is auto-delete and has no consumers, and deletes it if so.
@@ -323,27 +351,32 @@ func (vh *VHost) checkAutoDeleteQueueUnlocked(name string) (bool, error) {
 	return true, nil
 }
 
+// CleanupChannel cancels a closed channel's consumers and requeues every
+// message still unacked on it. The requeue happens after vh.mu is released.
 func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 	vh.mu.Lock()
-	defer vh.mu.Unlock()
-
 	channelKey := ConnectionChannelKey{connID, channel}
-	// Get copy of consumers to avoid modification during iteration
-	_ = cancelAllConsumers(vh, channelKey)
+	work := vh.cancelChannelConsumersLocked(channelKey)
 
 	if state := vh.ChannelDeliveries[channelKey]; state != nil {
+		// What is left are deliveries without a consumer (basic.get).
 		state.mu.Lock()
 		unackedMessages := fetchUnackedMessages(state)
-
 		state.mu.Unlock()
 
-		// Requeue unacknowledged messages
+		byQueue := make(map[string]int) // queue name -> index in work
 		for _, record := range unackedMessages {
 			queue, exists := vh.Queues[record.QueueName]
-			if exists {
-				queue.Push(record.Message)
-				vh.collector.RecordQueueRequeue(queue.Name)
+			if !exists {
+				continue
 			}
+			i, seen := byQueue[record.QueueName]
+			if !seen {
+				i = len(work)
+				byQueue[record.QueueName] = i
+				work = append(work, requeueWork{queue: queue})
+			}
+			work[i].records = append(work[i].records, record)
 		}
 		delete(vh.ChannelDeliveries, channelKey)
 	}
@@ -358,6 +391,9 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 		txState.Unlock()
 		delete(vh.ChannelTransactions, channelKey)
 	}
+	vh.mu.Unlock()
+
+	vh.requeue(work)
 }
 
 // fetchUnackedMessages retrieves all unacknowledged delivery records from the channel delivery state.
@@ -377,50 +413,36 @@ func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
 	return records
 }
 
-func cancelAllConsumers(vh *VHost, channelKey ConnectionChannelKey) bool {
-	consumersForChannel, exists := vh.ConsumersByChannel[channelKey]
-	if !exists {
-		return true // No consumers on this channel
-	}
-
+// cancelChannelConsumersLocked cancels every consumer on a channel. The
+// caller holds vh.mu and must pass the returned work to requeue after
+// releasing it.
+func (vh *VHost) cancelChannelConsumersLocked(channelKey ConnectionChannelKey) []requeueWork {
+	consumersForChannel := vh.ConsumersByChannel[channelKey]
 	consumersCopy := make([]*Consumer, len(consumersForChannel))
 	copy(consumersCopy, consumersForChannel)
 
-	// Cancel each consumer (this will modify the maps)
+	var work []requeueWork
 	for _, c := range consumersCopy {
-		// Unlock to call CancelConsumer (which also locks)
-		vh.mu.Unlock()
-		err := vh.CancelConsumer(c.Channel, c.Tag)
-		vh.mu.Lock()
-		if err != nil {
-			log.Error().Str("consumer", c.Tag).Msg("Error cancelling consumer")
+		key := ConsumerKey{c.Channel, c.Tag}
+		if vh.Consumers[key] != c {
+			continue // already cancelled
 		}
-
+		work = append(work, vh.cancelConsumerLocked(key, c)...)
 	}
 	delete(vh.ConsumersByChannel, channelKey)
-	return false
+	return work
 }
 
+// CleanupConnection cancels a closed connection's consumers and deletes its
+// exclusive queues. Unacked messages are requeued after vh.mu is released.
 func (vh *VHost) CleanupConnection(connID ConnectionID) {
 	vh.mu.Lock()
-	defer vh.mu.Unlock()
 
-	// Find all consumers for this connection
-	var consumersToRemove []*Consumer
-	for _, consumer := range vh.Consumers {
+	// Cancel each consumer of this connection
+	var work []requeueWork
+	for key, consumer := range vh.Consumers {
 		if consumer.ConnectionID == connID {
-			consumersToRemove = append(consumersToRemove, consumer)
-		}
-	}
-
-	// Cancel each consumer
-	for _, consumer := range consumersToRemove {
-		// Unlock to call CancelConsumer (which also locks)
-		vh.mu.Unlock()
-		err := vh.CancelConsumer(consumer.Channel, consumer.Tag)
-		vh.mu.Lock()
-		if err != nil {
-			log.Error().Str("consumer", consumer.Tag).Msg("Error cancelling consumer")
+			work = append(work, vh.cancelConsumerLocked(key, consumer)...)
 		}
 	}
 
@@ -442,6 +464,9 @@ func (vh *VHost) CleanupConnection(connID ConnectionID) {
 			log.Error().Str("queue", queueName).Msg("Error deleting exclusive queue")
 		}
 	}
+	vh.mu.Unlock()
+
+	vh.requeue(work)
 }
 
 func (vh *VHost) GetActiveConsumersForQueue(queueName string) []*Consumer {
