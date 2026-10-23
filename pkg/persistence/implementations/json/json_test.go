@@ -391,3 +391,68 @@ func TestBindings_SaveBindingRequiresExchange(t *testing.T) {
 		t.Fatalf("expected error saving binding for missing exchange, got nil")
 	}
 }
+
+// Regression test for #298: deleting a binding removes it from the exchange
+// file whether it was saved with no arguments, an empty table or real
+// arguments, and nil and an empty table name the same binding.
+func TestDeleteBindingState_MatchesNilAndEmptyArguments(t *testing.T) {
+	jsonPersistence, err := NewJsonPersistence(&persistence.Config{Type: "json", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Failed to create JSON persistence: %v", err)
+	}
+	vhostName := "/"
+	exchangeName := "ex"
+	if err := jsonPersistence.SaveExchangeMetadata(vhostName, exchangeName, "direct", persistence.ExchangeProperties{Durable: true}); err != nil {
+		t.Fatalf("SaveExchangeMetadata failed: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		saved       map[string]any
+		deletedWith map[string]any
+	}{
+		{"nil saved, empty deleted", nil, map[string]any{}},
+		{"empty saved, nil deleted", map[string]any{}, nil},
+		{"with arguments", map[string]any{"x-a": "b", "n": int32(5)}, map[string]any{"x-a": "b", "n": int32(5)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := jsonPersistence.SaveBindingState(vhostName, exchangeName, tc.name, "rk", tc.saved); err != nil {
+				t.Fatalf("SaveBindingState failed: %v", err)
+			}
+			if err := jsonPersistence.DeleteBindingState(vhostName, exchangeName, tc.name, "rk", tc.deletedWith); err != nil {
+				t.Fatalf("DeleteBindingState failed: %v", err)
+			}
+			bindings, err := jsonPersistence.LoadExchangeBindings(vhostName, exchangeName)
+			if err != nil {
+				t.Fatalf("LoadExchangeBindings failed: %v", err)
+			}
+			for _, b := range bindings {
+				if b.QueueName == tc.name {
+					t.Fatalf("exchange file still holds %+v after the binding was deleted", b)
+				}
+			}
+		})
+	}
+
+	// nil and an empty table are one binding, so saving both keeps one entry.
+	if err := jsonPersistence.SaveBindingState(vhostName, exchangeName, "dedup", "rk", nil); err != nil {
+		t.Fatalf("SaveBindingState failed: %v", err)
+	}
+	if err := jsonPersistence.SaveBindingState(vhostName, exchangeName, "dedup", "rk", map[string]any{}); err != nil {
+		t.Fatalf("SaveBindingState failed: %v", err)
+	}
+	bindings, err := jsonPersistence.LoadExchangeBindings(vhostName, exchangeName)
+	if err != nil {
+		t.Fatalf("LoadExchangeBindings failed: %v", err)
+	}
+	dedup := 0
+	for _, b := range bindings {
+		if b.QueueName == "dedup" {
+			dedup++
+		}
+	}
+	if dedup != 1 {
+		t.Fatalf("got %d bindings for nil and empty arguments, want 1: %+v", dedup, bindings)
+	}
+}

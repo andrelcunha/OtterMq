@@ -330,7 +330,7 @@ func (vh *VHost) loadPersistedState() {
 			if skippedQueues[bindingData.QueueName] {
 				continue
 			}
-			err := vh.BindQueue(exchange.Name, bindingData.QueueName, bindingData.RoutingKey, exchange.Properties.Arguments, INTERNAL_CONN_ID)
+			err := vh.BindQueue(exchange.Name, bindingData.QueueName, bindingData.RoutingKey, bindingData.Arguments, INTERNAL_CONN_ID)
 			if err != nil {
 				log.Error().Err(err).Str("exchange", exchange.Name).Msg("Error binding queue")
 			}

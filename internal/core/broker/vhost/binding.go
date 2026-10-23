@@ -2,7 +2,6 @@ package vhost
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -90,7 +89,7 @@ func (vh *VHost) BindQueue(exchangeName, queueName, routingKey string, args map[
 	}
 
 	if exchange.Props.Durable && queue.Props.Durable {
-		err := vh.persist.SaveBindingState(vh.Name, exchangeName, queueName, routingKey, exchange.Props.Arguments)
+		err := vh.persist.SaveBindingState(vh.Name, exchangeName, queueName, routingKey, args)
 		if err != nil {
 			log.Printf("Failed to save binding state: %v", err)
 		}
@@ -218,12 +217,9 @@ func bindingArgumentsMatch(a, b map[string]interface{}) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for k, v := range a {
-		if bv, ok := b[k]; !ok || !reflect.DeepEqual(v, bv) {
-			return false
-		}
-	}
-	return true
+	// Recovered bindings carry their arguments through a JSON round-trip
+	// (an int32 comes back as float64), so compare them as JSON.
+	return equalArgs(a, b)
 }
 
 // listFanoutQueuesUnlocked is an internal helper that assumes vh.mu is already locked
