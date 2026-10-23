@@ -155,9 +155,9 @@ Available configuration options:
 |---------------------|---------|-------------|
 | `OTTERMQ_BROKER_PORT` | `5672` | AMQP broker port |
 | `OTTERMQ_BROKER_HOST` | `` | Broker bind address (empty = all interfaces) |
-| `OTTERMQ_USERNAME` | `guest` | Bootstrap admin user, created on first start |
+| `OTTERMQ_USERNAME` | `guest` | Bootstrap admin user, created on start if it doesn't exist (the password of an existing user is not changed) |
 | `OTTERMQ_PASSWORD` | `guest` | Password of the bootstrap admin user |
-| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from localhost (AMQP and web API); set it empty to restrict nobody |
+| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from localhost (AMQP and web API); set it empty to restrict nobody. Behind a reverse proxy or TLS terminator on the same host, every client looks local |
 | `OTTERMQ_HEARTBEAT_INTERVAL` | `60` | Heartbeat interval in seconds |
 | `OTTERMQ_CHANNEL_MAX` | `2048` | Maximum number of channels |
 | `OTTERMQ_FRAME_MAX` | `131072` | Maximum frame size in bytes |
@@ -194,8 +194,16 @@ ottermq
 Images are published to the GitHub Container Registry: `latest` from `main` (the latest release), a version tag (e.g. `0.20.0` and `0.20`) for each `v*` release tag, and `edge` from `dev`, which has every merged change but isn't released yet.
 
 ```sh
-docker run -p 5672:5672 -p 3000:3000 ghcr.io/ottermq/ottermq:latest
+docker run -p 5672:5672 -p 3000:3000 \
+  -e OTTERMQ_USERNAME=admin -e OTTERMQ_PASSWORD='<choose a password>' \
+  ghcr.io/ottermq/ottermq:latest
 ```
+
+Set `OTTERMQ_USERNAME` and `OTTERMQ_PASSWORD`: the default `guest` user may only connect from
+localhost, and connections from the host reach the container from the Docker bridge, not from
+loopback, so `guest` is refused there. The broker creates the configured user as an administrator
+on start if it doesn't exist yet, also on an existing data dir; it doesn't change the password of an
+existing user.
 
 To build and run from source instead:
 
@@ -203,7 +211,8 @@ To build and run from source instead:
 docker compose up --build
 ```
 
-This uses `packaging/docker/Dockerfile` and `docker-compose.yml`.
+This uses `packaging/docker/Dockerfile` and `docker-compose.yml`. Uncomment and set
+`OTTERMQ_USERNAME`/`OTTERMQ_PASSWORD` in `docker.env` first, for the same reason.
 
 ## 🚧 Development Status
 

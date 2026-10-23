@@ -32,8 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   development only (#203).
 - **`guest` can only connect from localhost**, over AMQP (`connection.close` 403 ACCESS_REFUSED)
   and on `/api/login` (401), as in RabbitMQ. Clients on other hosts, including the host side of a
-  Docker container, need their own user: set `OTTERMQ_USERNAME`/`OTTERMQ_PASSWORD` before the first
-  start, or add one with `ottermqadmin users create`. `OTTERMQ_LOOPBACK_USERS` lists the restricted users
+  Docker container, need their own user: set `OTTERMQ_USERNAME`/`OTTERMQ_PASSWORD` and restart. The
+  broker creates that user as an administrator if it doesn't exist yet, on a new or an existing
+  install. `OTTERMQ_LOOPBACK_USERS` lists the restricted users
   (default `guest`); set it empty to restore the old behaviour. `docker-compose.yml` now
   publishes its ports on `127.0.0.1` only (#203).
 

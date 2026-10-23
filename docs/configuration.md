@@ -82,9 +82,9 @@ Control the built-in metrics collection system:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTTERMQ_USERNAME` | `guest` | Default admin username (first startup only) |
-| `OTTERMQ_PASSWORD` | `guest` | Default admin password (first startup only) |
-| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from a loopback address, over AMQP (`connection.close` 403) and `/api/login` (401). Set it empty to restrict nobody |
+| `OTTERMQ_USERNAME` | `guest` | Bootstrap admin username, created on start if it doesn't exist, also on an existing database |
+| `OTTERMQ_PASSWORD` | `guest` | Password for that user when it is created; an existing user's password is not changed |
+| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from a loopback address, over AMQP (`connection.close` 403) and `/api/login` (401). Set it empty to restrict nobody. A reverse proxy or TLS terminator on the same host makes every client look local, so these users are no longer restricted behind one |
 | `OTTERMQ_JWT_SECRET` | Auto-generated | Secret key for JWT token signing, at least 32 bytes. Unset, a random key is generated on first start and kept in `<data dir>/jwt.key` (mode 0600). The old default `secret`, or a shorter key, stops the broker at startup |
 | `OTTERMQ_INSECURE_DEV` | `false` | Accept a weak `OTTERMQ_JWT_SECRET`, with a warning at startup. Local development only |
 
