@@ -65,18 +65,18 @@ func TestLoggerOutput(t *testing.T) {
 func TestMetricsHookIntegration(t *testing.T) {
 	// Test that MetricsHook can be set (for future Prometheus integration)
 	var buf bytes.Buffer
-	
+
 	// Simple hook that does nothing but validates it can be set
 	testHook := zerolog.HookFunc(func(e *zerolog.Event, level zerolog.Level, msg string) {
 		// Hook functionality would be implemented here for metrics
 	})
-	
+
 	SetMetricsHook(testHook)
 	InitWithWriter(&buf, "info")
-	
+
 	// Verify logger works with hook
 	Logger.Info().Msg("Test with hook")
-	
+
 	if !strings.Contains(buf.String(), "Test with hook") {
 		t.Error("Logger with hook did not produce expected output")
 	}

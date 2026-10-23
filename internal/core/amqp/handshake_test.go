@@ -317,9 +317,9 @@ func TestReadFrame_IncompletePayload(t *testing.T) {
 func TestFrameRoundTrip(t *testing.T) {
 	// Create a complete METHOD frame
 	var payload bytes.Buffer
-	_ = binary.Write(&payload, binary.BigEndian, uint16(CHANNEL)) // Error ignored as bytes.Buffer.Write never fails
+	_ = binary.Write(&payload, binary.BigEndian, uint16(CHANNEL))      // Error ignored as bytes.Buffer.Write never fails
 	_ = binary.Write(&payload, binary.BigEndian, uint16(CHANNEL_OPEN)) // Error ignored as bytes.Buffer.Write never fails
-	payload.Write([]byte{0x00}) // empty short string
+	payload.Write([]byte{0x00})                                        // empty short string
 
 	channelNum := uint16(1)
 	frame := formatMethodFrame(channelNum, TypeClass(CHANNEL), TypeMethod(CHANNEL_OPEN), payload.Bytes())
@@ -600,4 +600,3 @@ func TestHandshake_StartOkNestedTablesAllocateLinearly(t *testing.T) {
 		t.Errorf("handshake allocated %d bytes for a %d byte frame, want under %d", allocated, len(frame), limit)
 	}
 }
-

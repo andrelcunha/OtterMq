@@ -1,8 +1,8 @@
 package api
 
 import (
-	"github.com/ottermq/ottermq/internal/core/broker"
 	"github.com/gofiber/fiber/v2"
+	"github.com/ottermq/ottermq/internal/core/broker"
 )
 
 // GetBasicBrokerInfo godoc

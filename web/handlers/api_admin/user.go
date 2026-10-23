@@ -5,9 +5,9 @@ import (
 	"net"
 	"slices"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/ottermq/ottermq/internal/core/models"
 	"github.com/ottermq/ottermq/internal/persistdb"
-	"github.com/gofiber/fiber/v2"
 )
 
 // AddUser godoc

@@ -6,11 +6,11 @@ import (
 	"net"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/broker/vhost"
 	"github.com/ottermq/ottermq/pkg/metrics"
 	"github.com/ottermq/ottermq/pkg/persistence/implementations/dummy"
-	"github.com/google/uuid"
 )
 
 // Reuse mockConn from queue_test.go in this package
@@ -23,9 +23,9 @@ func TestQueueDeleteHandler_IfUnusedBlocksWhenConsumersExist(t *testing.T) {
 		Enabled: false,
 	}, context.Background())
 	b := &Broker{
-		framer:      &amqp.DefaultFramer{},
-		connInfos:   make(map[net.Conn]*amqp.ConnectionInfo),
-		collector:   mockCollector,
+		framer:    &amqp.DefaultFramer{},
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		collector: mockCollector,
 	}
 	var options = vhost.VHostOptions{
 		QueueBufferSize: 100,
@@ -161,9 +161,9 @@ func TestQueueDeleteHandler_SuccessDeletesQueueAndSendsOk(t *testing.T) {
 		Enabled: false,
 	}, context.Background())
 	b := &Broker{
-		framer:      &amqp.DefaultFramer{},
-		connInfos:   make(map[net.Conn]*amqp.ConnectionInfo),
-		collector:   mockCollector,
+		framer:    &amqp.DefaultFramer{},
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		collector: mockCollector,
 	}
 	var options = vhost.VHostOptions{
 		QueueBufferSize: 100,

@@ -131,7 +131,7 @@ func TestFormatMethodFrame(t *testing.T) {
 	// reply-code (short), reply-text (shortstr), class-id (short), method-id (short)
 	var payload bytes.Buffer
 	_ = binary.Write(&payload, binary.BigEndian, uint16(200)) // reply code - Error ignored as bytes.Buffer.Write never fails
-	payload.WriteByte(0)                                  // empty shortstr (length 0)
+	payload.WriteByte(0)                                      // empty shortstr (length 0)
 	_ = binary.Write(&payload, binary.BigEndian, uint16(0))   // class id - Error ignored as bytes.Buffer.Write never fails
 	_ = binary.Write(&payload, binary.BigEndian, uint16(0))   // method id - Error ignored as bytes.Buffer.Write never fails
 
@@ -590,7 +590,7 @@ func TestCreateBasicReturnFrame_LongStrings(t *testing.T) {
 	framer := &DefaultFramer{}
 	channel := uint16(3)
 	replyCode := uint16(312)
-	
+
 	// Create strings at the edge of short string limit (255 bytes)
 	longText := string(make([]byte, 255))
 	for i := range longText {

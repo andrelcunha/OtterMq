@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DefaultBaseURL = "http://localhost:3000"
+	DefaultBaseURL   = "http://localhost:3000"
 	DefaultAPIPrefix = "/api"
 )
 

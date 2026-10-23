@@ -39,4 +39,3 @@ func NewLoginCmd(rt *Runtime) *cobra.Command {
 
 	return cmd
 }
-

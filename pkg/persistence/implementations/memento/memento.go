@@ -35,7 +35,7 @@ func (m *MementoPersistence) LoadAllExchanges(vhost string) ([]persistence.Excha
 func (m *MementoPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnapshot, error) {
 	return nil, nil
 }
-func (m *MementoPersistence) SaveVHostMetadata(name string) error  { return nil }
+func (m *MementoPersistence) SaveVHostMetadata(name string) error   { return nil }
 func (m *MementoPersistence) DeleteVHostMetadata(name string) error { return nil }
 func (m *MementoPersistence) LoadAllVHosts() ([]string, error)      { return nil, nil }
 func (m *MementoPersistence) Initialize() error                     { return nil }

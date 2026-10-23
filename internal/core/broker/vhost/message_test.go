@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
-	"github.com/google/uuid"
 )
 
 func TestPublishToInternalExchange(t *testing.T) {
