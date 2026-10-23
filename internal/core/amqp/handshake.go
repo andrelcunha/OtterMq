@@ -249,8 +249,8 @@ func processStartOkContent(startOkFrame *ConnectionStartOk) (string, error) {
 	if mechanism != "PLAIN" {
 		return "", fmt.Errorf("mechanism invalid or %s not suported", mechanism)
 	}
-	// parse username and password from startOkFrame.Response
-	log.Printf("Response: '%s'\n", startOkFrame.Response)
+	// parse username and password from startOkFrame.Response, which must
+	// never be logged: it holds the password
 	credentials := strings.Split(strings.Trim(startOkFrame.Response, " "), " ")
 	log.Debug().Str("username", credentials[0]).Msg("Credentials parsed")
 	if len(credentials) != 2 {
