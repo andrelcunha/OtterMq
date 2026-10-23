@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the management API: the shutdown `connection.close` was written to every client while holding the
   broker lock, with no time limit. The frames are now sent after the lock is released, with a 1s
   write deadline per client, and a client that doesn't take its frame in time is disconnected (#313).
+- Deleting a queue that still had consumers left them registered under the queue's name, so a queue
+  declared again with that name counted them and delivered its messages to them instead of to its
+  own consumers. The consumers of a deleted queue are now removed with it, and `basic.cancel` for a
+  consumer tag the broker doesn't know (such as one of those) gets `cancel-ok`, as in RabbitMQ,
+  instead of closing the channel with 404 (#312).
 - A crash during the first start, or two brokers starting at once on a fresh data dir, could
   leave an empty `jwt.key`, and the broker then refused to start until the file was removed. The
   generated key is now written to a temp file and linked into place, so `jwt.key` is either

@@ -180,9 +180,10 @@ func TestRemoveFailedConsumerIgnoresRecreatedQueue(t *testing.T) {
 	if _, err := vh.RegisterConsumer(oldConsumer); err != nil {
 		t.Fatalf("RegisterConsumer: %v", err)
 	}
+	// Deleting the queue removes its consumer, which frees the key (#312).
 	deleteWithin(t, vh, "q", time.Second)
-	if err := vh.CancelConsumer(1, "c"); err != nil {
-		t.Fatalf("CancelConsumer: %v", err)
+	if err := vh.CancelConsumer(1, "c"); err == nil {
+		t.Fatal("the deleted queue's consumer is still registered")
 	}
 
 	replacement, err := vh.CreateQueue("q", &QueueProperties{Arguments: map[string]any{}}, connID)

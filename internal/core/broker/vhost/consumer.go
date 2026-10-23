@@ -311,6 +311,32 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 	return work
 }
 
+// removeQueueConsumersLocked drops the consumers of a deleted queue from
+// every index. They are keyed by queue name, so left in place they would be
+// counted and delivered to by a queue later declared with the same name.
+// Their unacked deliveries stay on their channels, so the client can still
+// ack them. The caller holds vh.mu.
+// TODO: send basic.cancel to clients that advertise consumer_cancel_notify.
+func (vh *VHost) removeQueueConsumersLocked(queueName string) {
+	for _, consumer := range vh.ConsumersByQueue[queueName] {
+		consumer.Active.Store(false)
+		key := ConsumerKey{consumer.Channel, consumer.Tag}
+		if vh.Consumers[key] == consumer {
+			delete(vh.Consumers, key)
+		}
+		channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
+		consumersForChannel := vh.ConsumersByChannel[channelKey]
+		for i, c := range consumersForChannel {
+			if c == consumer {
+				vh.ConsumersByChannel[channelKey] = append(consumersForChannel[:i], consumersForChannel[i+1:]...)
+				break
+			}
+		}
+		vh.collector.RecordConsumerRemoved(queueName)
+	}
+	delete(vh.ConsumersByQueue, queueName)
+}
+
 // takeUnackedForConsumer removes a consumer's unacked deliveries from the
 // channel state and returns them.
 func takeUnackedForConsumer(state *ChannelDeliveryState, consumerTag string) []*DeliveryRecord {
