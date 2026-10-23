@@ -338,25 +338,20 @@ func (vh *VHost) removeQueueConsumersLocked(queueName string) {
 }
 
 // detachQueueDeliveriesLocked marks every unacked delivery of a deleted
-// queue as such and drops it from UnackedByConsumer, keeping it only in
-// UnackedByTag. The client can still ack it, but a consumer that reuses the
+// queue as such and drops it from UnackedByConsumer or UnackedByGet, keeping
+// it only in UnackedByTag. The client can still ack it, but a consumer that reuses the
 // tag doesn't inherit it (in its prefetch, or when it is canceled), and
 // nothing requeues it into a queue that later takes the name. The caller
 // holds vh.mu.
 func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
 	for _, state := range vh.ChannelDeliveries {
 		state.mu.Lock()
-		for deliveryTag, record := range state.UnackedByTag {
+		for _, record := range state.UnackedByTag {
 			if record.QueueName != queueName || record.QueueDeleted {
 				continue
 			}
 			record.QueueDeleted = true
-			if byConsumer := state.UnackedByConsumer[record.ConsumerTag]; byConsumer != nil {
-				delete(byConsumer, deliveryTag)
-				if len(byConsumer) == 0 {
-					delete(state.UnackedByConsumer, record.ConsumerTag)
-				}
-			}
+			untrackDeliverySource(state, record)
 		}
 		state.mu.Unlock()
 	}
@@ -450,10 +445,11 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 	vh.requeue(work)
 }
 
-// fetchUnackedMessages retrieves all unacknowledged delivery records from the channel delivery state.
+// fetchUnackedMessages returns the channel's unacked deliveries from
+// consumers and basic.get, leaving out those of deleted queues (which are
+// only in UnackedByTag). The caller holds state.mu.
 func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
-	// Count total unacked messages
-	totalUnacked := 0
+	totalUnacked := len(state.UnackedByGet)
 	for _, consumeMap := range state.UnackedByConsumer {
 		totalUnacked += len(consumeMap)
 	}
@@ -463,6 +459,9 @@ func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
 		for _, record := range consumeMap {
 			records = append(records, record)
 		}
+	}
+	for _, record := range state.UnackedByGet {
+		records = append(records, record)
 	}
 	return records
 }

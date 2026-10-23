@@ -79,7 +79,7 @@ func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, delivery
 			log.Debug().Uint64("tag", tag).Msg("Checking unacked tag for multiple ack")
 			if deliveryTag == 0 || tag <= deliveryTag {
 				removed = append(removed, record)
-				deleteUnackedDelivery(ch, tag, record.ConsumerTag)
+				deleteUnackedDelivery(ch, record)
 				log.Debug().Uint64("tag", tag).Msg("Removed unacked tag for multiple ack")
 			}
 		}
@@ -91,7 +91,7 @@ func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, delivery
 			return nil, unknownDeliveryTagError(deliveryTag, methodID)
 		}
 		removed = append(removed, record)
-		deleteUnackedDelivery(ch, deliveryTag, record.ConsumerTag)
+		deleteUnackedDelivery(ch, record)
 		log.Debug().Uint64("tag", deliveryTag).Msg("Removed unacked tag for single ack")
 	}
 	// Notify any waiters that unacked state has changed
@@ -104,14 +104,25 @@ func (vh *VHost) popUnackedRecords(connID ConnectionID, channel uint16, delivery
 	return removed, nil
 }
 
-func deleteUnackedDelivery(ch *ChannelDeliveryState, tag uint64, consumerTag string) {
-	delete(ch.UnackedByTag, tag)
+// deleteUnackedDelivery removes a delivery from every unacked index. The
+// caller holds ch.mu.
+func deleteUnackedDelivery(ch *ChannelDeliveryState, record *DeliveryRecord) {
+	delete(ch.UnackedByTag, record.DeliveryTag)
+	untrackDeliverySource(ch, record)
+}
 
-	// Remove from consumer's nested map
-	if consumerMap, exists := ch.UnackedByConsumer[consumerTag]; exists {
-		delete(consumerMap, tag)
+// untrackDeliverySource removes a delivery from the index of its source:
+// UnackedByGet for basic.get, else its consumer's map in UnackedByConsumer.
+// The caller holds ch.mu.
+func untrackDeliverySource(ch *ChannelDeliveryState, record *DeliveryRecord) {
+	if record.FromGet {
+		delete(ch.UnackedByGet, record.DeliveryTag)
+		return
+	}
+	if consumerMap, exists := ch.UnackedByConsumer[record.ConsumerTag]; exists {
+		delete(consumerMap, record.DeliveryTag)
 		if len(consumerMap) == 0 {
-			delete(ch.UnackedByConsumer, consumerTag)
+			delete(ch.UnackedByConsumer, record.ConsumerTag)
 		}
 	}
 }
@@ -213,6 +224,7 @@ func (vh *VHost) HandleBasicQos(connID ConnectionID, channel uint16, prefetchCou
 	if state == nil {
 		state = &ChannelDeliveryState{
 			UnackedByConsumer: make(map[string]map[uint64]*DeliveryRecord),
+			UnackedByGet:      make(map[uint64]*DeliveryRecord),
 			UnackedByTag:      make(map[uint64]*DeliveryRecord),
 			unackedChanged:    make(chan struct{}, 1),
 			FlowActive:        true, // Default to flow active

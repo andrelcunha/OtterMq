@@ -10,10 +10,14 @@ import (
 
 type DeliveryRecord struct {
 	DeliveryTag uint64
+	// ConsumerTag is empty for a basic.get delivery (FromGet).
 	ConsumerTag string
-	QueueName   string
-	Message     Message
-	Persistent  bool
+	// FromGet marks a basic.get delivery. It is tracked in UnackedByGet
+	// instead of UnackedByConsumer, so that no consumer tag stands for it.
+	FromGet    bool
+	QueueName  string
+	Message    Message
+	Persistent bool
 	// QueueDeleted is set, under the channel state's mu, once the queue is
 	// deleted. Such a delivery can still be acked, but is never requeued or
 	// dead-lettered: another queue may have taken the name.
@@ -24,11 +28,17 @@ type ChannelDeliveryState struct {
 	mu              sync.Mutex
 	LastDeliveryTag uint64
 
-	// Dual-index for unacked messages
-	// Primary index: nested by consumer tag for O(1) lookups when acknowledging
+	// Indexes of unacked messages. Every delivery is in UnackedByTag, and
+	// also in UnackedByConsumer (consumer deliveries) or UnackedByGet
+	// (basic.get deliveries), until its queue is deleted (see
+	// detachQueueDeliveriesLocked).
+	// By consumer tag, for prefetch and for requeuing on cancel.
 	UnackedByConsumer map[string]map[uint64]*DeliveryRecord // consumerTag -> (deliveryTag -> DeliveryRecord)
 
-	// Secondary index: flat map for O(1) deliveryTag lookups (ack/nack)
+	// basic.get deliveries, which have no consumer.
+	UnackedByGet map[uint64]*DeliveryRecord // deliveryTag -> DeliveryRecord
+
+	// Flat map for O(1) deliveryTag lookups (ack/nack)
 	UnackedByTag map[uint64]*DeliveryRecord // deliveryTag -> DeliveryRecord
 
 	GlobalPrefetchCount   uint16
@@ -105,8 +115,9 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	tag := ch.LastDeliveryTag
 
 	track := !consumer.Props.NoAck // only track when manual ack is required
+	var record *DeliveryRecord
 	if track {
-		record := &DeliveryRecord{
+		record = &DeliveryRecord{
 			DeliveryTag: tag,
 			ConsumerTag: consumer.Tag,
 			QueueName:   consumer.QueueName,
@@ -149,7 +160,7 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 		log.Error().Err(err).Msg("Failed to send frames")
 		if track {
 			ch.mu.Lock()
-			deleteUnackedDelivery(ch, tag, consumer.Tag)
+			deleteUnackedDelivery(ch, record)
 
 			ch.mu.Unlock()
 		}
@@ -180,6 +191,7 @@ func (vh *VHost) GetOrCreateChannelDelivery(channelKey ConnectionChannelKey) *Ch
 	if ch == nil {
 		ch = &ChannelDeliveryState{
 			UnackedByConsumer: make(map[string]map[uint64]*DeliveryRecord),
+			UnackedByGet:      make(map[uint64]*DeliveryRecord),
 			UnackedByTag:      make(map[uint64]*DeliveryRecord),
 			unackedChanged:    make(chan struct{}, 1),
 			FlowActive:        true,
@@ -290,28 +302,24 @@ func (ch *ChannelDeliveryState) TrackDelivery(noAck bool, msg *Message, queue st
 	defer ch.mu.Unlock()
 	ch.LastDeliveryTag++
 	deliveryTag := ch.LastDeliveryTag
-	consumerTag := BASIC_GET_SENTINEL // Basic.Get uses sentinel value
 
 	// Track the delivery if manual ack is required
 	if !noAck {
 		record := &DeliveryRecord{
 			DeliveryTag: deliveryTag,
-			ConsumerTag: consumerTag,
+			FromGet:     true,
 			Message:     *msg,
 			QueueName:   queue,
 			Persistent:  msg.Properties.DeliveryMode == amqp.PERSISTENT,
 		}
-		// Dual-index: add to both maps
 		ch.UnackedByTag[deliveryTag] = record
-
-		if ch.UnackedByConsumer[consumerTag] == nil {
-			ch.UnackedByConsumer[consumerTag] = make(map[uint64]*DeliveryRecord)
+		if ch.UnackedByGet == nil {
+			ch.UnackedByGet = make(map[uint64]*DeliveryRecord)
 		}
-		ch.UnackedByConsumer[consumerTag][deliveryTag] = record
+		ch.UnackedByGet[deliveryTag] = record
 
 		log.Debug().
 			Uint64("delivery_tag", deliveryTag).
-			Str("consumer", consumerTag).
 			Str("queue", queue).
 			Msg("Tracking Basic.Get delivery for manual ack")
 	}

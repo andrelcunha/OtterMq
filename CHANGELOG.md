@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still be acked, but are no longer requeued into a queue that takes the name. `basic.cancel` for a
   consumer tag the broker doesn't know (such as one of those) gets `cancel-ok`, as in RabbitMQ,
   instead of closing the channel with 404 (#312).
+- A consumer tagged `__basic_get__` shared its channel's `basic.get` deliveries: they counted
+  against its prefetch, cancelling it requeued them into its own queue, and `basic.recover` requeued
+  its messages instead of redelivering them to it. `basic.get` deliveries are now tracked apart
+  from consumers, so that tag behaves like any other (#321).
 - A crash during the first start, or two brokers starting at once on a fresh data dir, could
   leave an empty `jwt.key`, and the broker then refused to start until the file was removed. The
   generated key is now written to a temp file and linked into place, so `jwt.key` is either

@@ -20,8 +20,9 @@ func (vh *VHost) HandleBasicRecover(connID ConnectionID, channel uint16, requeue
 	ch.mu.Lock()
 	unackedMessages := fetchUnackedMessages(ch)
 
-	// Clear both indexes
+	// Clear the indexes
 	ch.UnackedByConsumer = make(map[string]map[uint64]*DeliveryRecord)
+	ch.UnackedByGet = make(map[uint64]*DeliveryRecord)
 	ch.UnackedByTag = make(map[uint64]*DeliveryRecord)
 	ch.mu.Unlock()
 
@@ -37,8 +38,8 @@ func (vh *VHost) HandleBasicRecover(connID ConnectionID, channel uint16, requeue
 			vh.requeueMessage(record)
 		} else {
 			// Basic.Recover with requeue=false: redeliver to original consumer
-			// Skip Basic.Get deliveries (sentinel value) - they have no consumer to redeliver to
-			if record.ConsumerTag == BASIC_GET_SENTINEL {
+			// Basic.Get deliveries have no consumer to redeliver to
+			if record.FromGet {
 				log.Debug().Msg("Skipping Basic.Get delivery on Basic.Recover(requeue=false), requeuing")
 				vh.requeueMessage(record)
 				continue
