@@ -14,6 +14,10 @@ type DeliveryRecord struct {
 	QueueName   string
 	Message     Message
 	Persistent  bool
+	// QueueDeleted is set, under the channel state's mu, once the queue is
+	// deleted. Such a delivery can still be acked, but is never requeued or
+	// dead-lettered: another queue may have taken the name.
+	QueueDeleted bool
 }
 
 type ChannelDeliveryState struct {
@@ -90,6 +94,13 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	ch := vh.GetOrCreateChannelDelivery(channelKey)
 
 	ch.mu.Lock()
+	// Checked again under ch.mu: deleting the queue clears Active and then
+	// detaches the queue's deliveries under each ch.mu, so a delivery either
+	// sees Active cleared here or is detached with the others.
+	if !consumer.Active.Load() {
+		ch.mu.Unlock()
+		return fmt.Errorf("consumer %s on channel %d is not active", consumer.Tag, consumer.Channel)
+	}
 	ch.LastDeliveryTag++
 	tag := ch.LastDeliveryTag
 

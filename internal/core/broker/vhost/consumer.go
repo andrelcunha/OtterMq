@@ -311,6 +311,57 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 	return work
 }
 
+// removeQueueConsumersLocked drops the consumers of a deleted queue from
+// every index. They are keyed by queue name, so left in place they would be
+// counted and delivered to by a queue later declared with the same name.
+// Their unacked deliveries are handled by detachQueueDeliveriesLocked. The
+// caller holds vh.mu.
+// TODO: send basic.cancel to clients that advertise consumer_cancel_notify.
+func (vh *VHost) removeQueueConsumersLocked(queueName string) {
+	for _, consumer := range vh.ConsumersByQueue[queueName] {
+		consumer.Active.Store(false)
+		key := ConsumerKey{consumer.Channel, consumer.Tag}
+		if vh.Consumers[key] == consumer {
+			delete(vh.Consumers, key)
+		}
+		channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
+		consumersForChannel := vh.ConsumersByChannel[channelKey]
+		for i, c := range consumersForChannel {
+			if c == consumer {
+				vh.ConsumersByChannel[channelKey] = append(consumersForChannel[:i], consumersForChannel[i+1:]...)
+				break
+			}
+		}
+		vh.collector.RecordConsumerRemoved(queueName)
+	}
+	delete(vh.ConsumersByQueue, queueName)
+}
+
+// detachQueueDeliveriesLocked marks every unacked delivery of a deleted
+// queue as such and drops it from UnackedByConsumer, keeping it only in
+// UnackedByTag. The client can still ack it, but a consumer that reuses the
+// tag doesn't inherit it (in its prefetch, or when it is canceled), and
+// nothing requeues it into a queue that later takes the name. The caller
+// holds vh.mu.
+func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
+	for _, state := range vh.ChannelDeliveries {
+		state.mu.Lock()
+		for deliveryTag, record := range state.UnackedByTag {
+			if record.QueueName != queueName || record.QueueDeleted {
+				continue
+			}
+			record.QueueDeleted = true
+			if byConsumer := state.UnackedByConsumer[record.ConsumerTag]; byConsumer != nil {
+				delete(byConsumer, deliveryTag)
+				if len(byConsumer) == 0 {
+					delete(state.UnackedByConsumer, record.ConsumerTag)
+				}
+			}
+		}
+		state.mu.Unlock()
+	}
+}
+
 // takeUnackedForConsumer removes a consumer's unacked deliveries from the
 // channel state and returns them.
 func takeUnackedForConsumer(state *ChannelDeliveryState, consumerTag string) []*DeliveryRecord {
