@@ -193,7 +193,6 @@ func parseQueueBindFrame(payload []byte) (*RequestMethodMessage, error) {
 	if len(payload) < 6 {
 		return nil, fmt.Errorf("payload too short")
 	}
-	log.Debug().Bytes("payload", payload).Msg("Received QUEUE_BIND frame")
 	buf := bytes.NewReader(payload)
 	reserverd1, err := DecodeShortInt(buf)
 	if err != nil {
@@ -229,6 +228,13 @@ func parseQueueBindFrame(payload []byte) (*RequestMethodMessage, error) {
 			return nil, fmt.Errorf("failed to read arguments: %v", err)
 		}
 	}
+	log.Debug().
+		Str("queue", queue).
+		Str("exchange", exchange).
+		Str("routing_key", routingKey).
+		Bool("no_wait", noWait).
+		Int("arguments", len(arguments)).
+		Msg("Received QUEUE_BIND frame")
 	msg := &QueueBindMessage{
 		Queue:      queue,
 		Exchange:   exchange,
@@ -332,8 +338,6 @@ func parseQueueDeleteFrame(payload []byte) (*RequestMethodMessage, error) {
 	if len(payload) < 6 {
 		return nil, fmt.Errorf("payload too short")
 	}
-	log.Debug().Bytes("payload", payload).Msg("Received QUEUE_DELETE frame")
-
 	buf := bytes.NewReader(payload)
 	reserverd1, err := DecodeShortInt(buf)
 	if err != nil {
@@ -354,6 +358,12 @@ func parseQueueDeleteFrame(payload []byte) (*RequestMethodMessage, error) {
 	ifUnused := flags["ifUnused"]
 	ifEmpty := flags["ifEmpty"]
 	noWait := flags["noWait"]
+	log.Debug().
+		Str("queue", exchangeName).
+		Bool("if_unused", ifUnused).
+		Bool("if_empty", ifEmpty).
+		Bool("no_wait", noWait).
+		Msg("Received QUEUE_DELETE frame")
 
 	msg := &QueueDeleteMessage{
 		QueueName: exchangeName,

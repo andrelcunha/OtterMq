@@ -138,8 +138,6 @@ func parseExchangeDeleteFrame(payload []byte) (*RequestMethodMessage, error) {
 	if len(payload) < 6 {
 		return nil, fmt.Errorf("payload too short")
 	}
-	log.Debug().Bytes("payload", payload).Msg("Received EXCHANGE_DELETE frame")
-
 	buf := bytes.NewReader(payload)
 	reserverd1, err := DecodeShortInt(buf)
 	if err != nil {
@@ -159,6 +157,11 @@ func parseExchangeDeleteFrame(payload []byte) (*RequestMethodMessage, error) {
 	flags := DecodeFlags(octet, []string{"ifUnused", "noWait"}, true)
 	ifUnused := flags["ifUnused"]
 	noWait := flags["noWait"]
+	log.Debug().
+		Str("exchange", exchangeName).
+		Bool("if_unused", ifUnused).
+		Bool("no_wait", noWait).
+		Msg("Received EXCHANGE_DELETE frame")
 
 	msg := &ExchangeDeleteMessage{
 		ExchangeName: exchangeName,

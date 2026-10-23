@@ -205,7 +205,6 @@ func parseChannelFlowOkFrame(payload []byte) (*RequestMethodMessage, error) {
 }
 
 func parseChannelCloseFrame(payload []byte) (*RequestMethodMessage, error) {
-	log.Trace().Msgf("Received CHANNEL_CLOSE frame: %x \n", payload)
 	if len(payload) < 6 {
 		return nil, fmt.Errorf("frame too short")
 	}
@@ -228,6 +227,12 @@ func parseChannelCloseFrame(payload []byte) (*RequestMethodMessage, error) {
 		return nil, fmt.Errorf("failed decoding method id: %v", err)
 	}
 
+	log.Trace().
+		Uint16("reply_code", replyCode).
+		Str("reply_text", replyText).
+		Uint16("class_id", classID).
+		Uint16("method_id", methodID).
+		Msg("Received CHANNEL_CLOSE frame")
 	msg := &ChannelCloseContent{
 		ReplyCode: replyCode,
 		ReplyText: replyText,

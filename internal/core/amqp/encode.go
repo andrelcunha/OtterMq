@@ -14,7 +14,7 @@ func encodeHeaders(buf *bytes.Buffer, table map[string]any) {
 	encodedTable := EncodeTable(table)
 	EncodeLongStr(buf, encodedTable)
 	// log.Debug().Int("encoded_size", len(encodedTable)).Msg("Encoded table size")
-	log.Debug().Hex("encoded_table", encodedTable).Msg("Encoded headers table")
+	log.Debug().Int("encoded_size", len(encodedTable)).Msg("Encoded headers table")
 }
 
 // encodeValueToBuffer encodes a single AMQP field value into the provided buffer

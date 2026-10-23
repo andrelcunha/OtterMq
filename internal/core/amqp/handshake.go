@@ -397,7 +397,26 @@ func readFrame(conn net.Conn, frameMax uint32) ([]byte, error) {
 }
 
 func sendFrame(conn net.Conn, frame []byte) error {
-	log.Trace().Msgf("Sending frame: %x\n", frame)
+	logOutboundFrame(frame)
 	_, err := conn.Write(frame)
 	return err
+}
+
+// logOutboundFrame logs a frame's header, and the class and method of a
+// method frame, but never its payload.
+func logOutboundFrame(frame []byte) {
+	if len(frame) < 7 {
+		log.Trace().Int("frame_size", len(frame)).Msg("Sending frame")
+		return
+	}
+	event := log.Trace().
+		Uint8("frame_type", frame[0]).
+		Uint16("channel", binary.BigEndian.Uint16(frame[1:3])).
+		Int("frame_size", len(frame))
+	if frame[0] == byte(TYPE_METHOD) && len(frame) >= 11 {
+		event = event.
+			Uint16("class_id", binary.BigEndian.Uint16(frame[7:9])).
+			Uint16("method_id", binary.BigEndian.Uint16(frame[9:11]))
+	}
+	event.Msg("Sending frame")
 }
