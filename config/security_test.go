@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -80,6 +81,64 @@ func TestResolveJwtSecret_ShortKeyFile(t *testing.T) {
 	}
 	if _, _, err := ResolveJwtSecret(&Config{DataDir: dataDir}); err == nil {
 		t.Fatal("ResolveJwtSecret accepted a 3-byte key file")
+	}
+}
+
+// Brokers starting at the same time on a fresh data dir all get the same key;
+// none of them sees a half-written key file.
+func TestResolveJwtSecret_ConcurrentCreation(t *testing.T) {
+	const rounds, starts = 100, 24
+	for round := 0; round < rounds; round++ {
+		cfg := &Config{DataDir: filepath.Join(t.TempDir(), "data")}
+		keys := make([]string, starts)
+		errs := make([]error, starts)
+		var ready, done sync.WaitGroup
+		ready.Add(starts)
+		done.Add(starts)
+		for i := 0; i < starts; i++ {
+			go func(i int) {
+				defer done.Done()
+				ready.Done()
+				ready.Wait()
+				keys[i], _, errs[i] = ResolveJwtSecret(cfg)
+			}(i)
+		}
+		done.Wait()
+		for i := range keys {
+			if errs[i] != nil {
+				t.Fatalf("round %d, start %d: %v", round, i, errs[i])
+			}
+			if keys[i] != keys[0] {
+				t.Fatalf("round %d: start %d got key %q, start 0 got %q", round, i, keys[i], keys[0])
+			}
+		}
+	}
+}
+
+// A temp file left behind by a start that crashed before publishing its key
+// doesn't stop the next start, and the key is generated as usual.
+func TestResolveJwtSecret_CrashLeftoverTempFile(t *testing.T) {
+	dataDir := t.TempDir()
+	leftover := filepath.Join(dataDir, jwtKeyFile+".tmp-123456")
+	if err := os.WriteFile(leftover, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, _, err := ResolveJwtSecret(&Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("ResolveJwtSecret with a leftover temp file: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, jwtKeyFile))
+	if err != nil || strings.TrimSpace(string(data)) != key {
+		t.Fatalf("%s = %q, %v; want %q", jwtKeyFile, data, err, key)
+	}
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if name := e.Name(); name != jwtKeyFile && name != filepath.Base(leftover) {
+			t.Errorf("unexpected file %s left in the data dir", name)
+		}
 	}
 }
 

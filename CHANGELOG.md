@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A crash during the first start, or two brokers starting at once on a fresh data dir, could
+  leave an empty `jwt.key`, and the broker then refused to start until the file was removed. The
+  generated key is now written to a temp file and linked into place, so `jwt.key` is either
+  missing or complete (#203).
 - Getting messages through the management API now sizes its result by the number of messages in
   the queue, not by the requested count, so a very large `message_count` no longer fails the
   request.
