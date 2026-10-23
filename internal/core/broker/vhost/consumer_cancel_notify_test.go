@@ -221,3 +221,81 @@ func TestDeleteQueueIsNotHeldUpByUnresponsiveClient(t *testing.T) {
 		t.Errorf("basic.cancel sent = %+v, want %+v while the stuck client blocks", cancels, want)
 	}
 }
+
+// orderSender records the kind of each frame it is sent, in order, and holds
+// the first delivery until gate is closed.
+type orderSender struct {
+	gate    chan struct{}
+	blocked chan struct{}
+	once    sync.Once
+
+	mu     sync.Mutex
+	frames []string
+}
+
+func (s *orderSender) ConsumerCancelNotify(ConnectionID) bool { return true }
+
+func (s *orderSender) SendFrame(_ ConnectionID, _ uint16, frame []byte) error {
+	kind := "other"
+	switch {
+	case strings.HasPrefix(string(frame), "basic-deliver"):
+		kind = "deliver"
+		s.once.Do(func() {
+			close(s.blocked)
+			<-s.gate
+		})
+	case strings.HasPrefix(string(frame), "basic-cancel:"):
+		kind = "cancel"
+	}
+	s.mu.Lock()
+	s.frames = append(s.frames, kind)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *orderSender) kinds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.frames...)
+}
+
+// A delivery already being written when its queue is deleted reaches the
+// client before the basic.cancel for its consumer: a client drops (or hands
+// to a consumer reusing the tag) a delivery that arrives after the cancel.
+func TestBasicCancelDoesNotOvertakeInFlightDelivery(t *testing.T) {
+	sender := &orderSender{gate: make(chan struct{}), blocked: make(chan struct{})}
+	vh := newLoopTestVHost(t, sender)
+	connID := newTestConsumerConnID()
+
+	q, err := vh.CreateQueue("q", cancelTestQueueProps(), connID)
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	registerNoAck(t, vh, connID, 1, "q", "c")
+	q.Push(Message{ID: "m1"})
+	select {
+	case <-sender.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delivery did not start")
+	}
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- vh.DeleteQueuebyName("q") }()
+	time.Sleep(100 * time.Millisecond) // a cancel not waiting for the delivery would be written by now
+	close(sender.gate)
+	select {
+	case err := <-deleted:
+		if err != nil {
+			t.Fatalf("DeleteQueuebyName: %v", err)
+		}
+	case <-time.After(3 * cancelNotifyWait):
+		t.Fatal("DeleteQueuebyName did not return")
+	}
+
+	if !waitFor(2*time.Second, func() bool { return len(sender.kinds()) >= 2 }) {
+		t.Fatalf("frames sent = %v, want a delivery and a cancel", sender.kinds())
+	}
+	if got := sender.kinds(); got[0] != "deliver" || got[1] != "cancel" {
+		t.Errorf("frames sent = %v, want the delivery before the cancel", got)
+	}
+}

@@ -46,6 +46,10 @@ type Consumer struct {
 	Props         *ConsumerProperties
 
 	frameSender FrameSender
+	// sendMu is held while a delivery to this consumer is checked and
+	// written, and while the server writes basic.cancel for it, so the
+	// cancel can't overtake a delivery already past its Active checks.
+	sendMu sync.Mutex
 }
 
 type ConsumerProperties struct {
@@ -394,7 +398,12 @@ func (cc consumerCancels) send() {
 			defer wg.Done()
 			for _, c := range consumers {
 				frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
-				if err := cc.sender.SendFrame(connID, c.Channel, frame); err != nil {
+				// Active is already cleared: a delivery that takes sendMu
+				// after this gives up, one holding it is written first.
+				c.sendMu.Lock()
+				err := cc.sender.SendFrame(connID, c.Channel, frame)
+				c.sendMu.Unlock()
+				if err != nil {
 					log.Debug().Err(err).
 						Str("consumer", c.Tag).
 						Uint16("channel", c.Channel).

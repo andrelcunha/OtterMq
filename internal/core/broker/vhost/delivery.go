@@ -97,6 +97,10 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	if !redelivered {
 		redelivered = vh.ShouldRedeliver(msg.ID)
 	}
+	// Held until the frames are written, so a server-sent basic.cancel for
+	// this consumer (consumerCancels.send) can't overtake this delivery.
+	consumer.sendMu.Lock()
+	defer consumer.sendMu.Unlock()
 	if !consumer.Active.Load() {
 		return fmt.Errorf("consumer %s on channel %d is not active", consumer.Tag, consumer.Channel)
 	}
