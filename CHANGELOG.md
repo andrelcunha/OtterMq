@@ -9,29 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Deleting a queue no longer hangs the whole vhost. Deletion waited for the queue's delivery
-  loop while holding the vhost lock, so it deadlocked when the loop needed that lock, when the
-  loop was blocked writing to a consumer that had stopped reading, or after a failed delivery
-  had removed the queue's last consumer (the loop then waited for itself, and the queue stopped
-  delivering for good). Deletion now stops the loop without waiting for it (#214).
-- A queue no longer stops delivering when a consumer subscribes while the queue's last consumer
-  is being cancelled, and cancelling a consumer no longer waits for a delivery in flight. Each
-  queue now keeps one delivery goroutine for its whole life, which waits for consumers instead
-  of exiting when the last one leaves (#218).
-- Cancelling a consumer, closing its channel or disconnecting no longer deadlocks the vhost when
-  the consumer's unacked messages go back to a queue with `x-max-length` and a dead-letter
-  exchange. The messages were requeued while the vhost lock was held, and the requeue
-  dead-lettered an evicted message, which takes that lock again. Requeues and publishes to
-  queues now happen after the lock is released (#215).
-
 ## [v0.21.1]
 
 > **Not production-ready.** The notice for v0.21.0 still applies: stop-ship issues remain open (see
 > the [Phase 0 milestone](https://github.com/ottermq/ottermq/milestone/8)). This release fixes two
 > memory-exhaustion issues reachable before authentication; upgrade if your AMQP port is reachable
-> by clients you don't trust.
+> by clients you don't trust. It also fixes three delivery-loop deadlocks (#214, #215, #218).
 
 ### Security
 
@@ -48,6 +31,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allocated for them.
 - Nested field tables and arrays are decoded in place instead of being copied at every level, so
   decoding memory grows with the size of the frame, not with the square of its nesting depth.
+- Deleting a queue no longer hangs the whole vhost. Deletion waited for the queue's delivery
+  loop while holding the vhost lock, so it deadlocked when the loop needed that lock, when the
+  loop was blocked writing to a consumer that had stopped reading, or after a failed delivery
+  had removed the queue's last consumer (the loop then waited for itself, and the queue stopped
+  delivering for good). Deletion now stops the loop without waiting for it (#214).
+- A queue no longer stops delivering when a consumer subscribes while the queue's last consumer
+  is being cancelled, and cancelling a consumer no longer waits for a delivery in flight. Each
+  queue now keeps one delivery goroutine for its whole life, which waits for consumers instead
+  of exiting when the last one leaves (#218).
+- Cancelling a consumer, closing its channel or disconnecting no longer deadlocks the vhost when
+  the consumer's unacked messages go back to a queue with `x-max-length` and a dead-letter
+  exchange. The messages were requeued while the vhost lock was held, and the requeue
+  dead-lettered an evicted message, which takes that lock again. Requeues and publishes to
+  queues now happen after the lock is released (#215).
 
 ## [v0.21.0]
 
