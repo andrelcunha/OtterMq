@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Getting messages through the management API now sizes its result by the number of messages in
   the queue, not by the requested count, so a very large `message_count` no longer fails the
   request.
+- A panic in a web API handler now fails only that request with a 500 and is logged with its
+  stack trace. Before, it ended the whole process, taking the AMQP broker down with the web API.
 
 ## [v0.21.1]
 

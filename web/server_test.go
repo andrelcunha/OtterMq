@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 func TestSetupApp_UIFallback(t *testing.T) {
@@ -44,6 +46,31 @@ func TestSetupApp_UIFallback(t *testing.T) {
 		}
 		if tt.wantBody != "" && string(body) != tt.wantBody {
 			t.Errorf("%s: body %q, want %q", tt.path, body, tt.wantBody)
+		}
+	}
+}
+
+// A panic in a handler is turned into a 500 for that request; the server keeps
+// serving instead of the panic ending the process.
+func TestSetupApp_RecoversHandlerPanic(t *testing.T) {
+	ws, _ := NewWebServer(&Config{ApiPrefix: "/api", JwtKey: "test"}, nil)
+	app := ws.SetupApp(nil)
+	app.Get("/panics", func(c *fiber.Ctx) error { panic("handler failed") })
+	app.Get("/works", func(c *fiber.Ctx) error { return c.SendString("ok") })
+
+	for _, tt := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{"/panics", 500},
+		{"/works", 200}, // still serving after the panic
+	} {
+		resp, err := app.Test(httptest.NewRequest("GET", tt.path, nil))
+		if err != nil {
+			t.Fatalf("%s: %v", tt.path, err)
+		}
+		if resp.StatusCode != tt.wantStatus {
+			t.Errorf("%s: status %d, want %d", tt.path, resp.StatusCode, tt.wantStatus)
 		}
 	}
 }
