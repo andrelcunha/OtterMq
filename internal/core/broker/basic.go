@@ -354,6 +354,12 @@ func (b *Broker) basicCancelHandler(request *amqp.RequestMethodMessage, conn net
 
 	consumerTag := content.ConsumerTag
 	err := vh.CancelConsumer(request.Channel, consumerTag)
+	if amqpErr, ok := err.(*errors.ChannelError); ok && amqpErr.ReplyCode() == uint16(amqp.NOT_FOUND) {
+		// An unknown tag is ignored, as in RabbitMQ: the consumer may already
+		// be gone because its queue was deleted.
+		log.Debug().Str("consumer_tag", consumerTag).Msg("basic.cancel for an unknown consumer tag")
+		err = nil
+	}
 	if err != nil {
 		// verify if it is a amqp error
 		if amqpErr, ok := err.(*errors.ChannelError); ok {
