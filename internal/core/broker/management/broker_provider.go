@@ -11,7 +11,6 @@ import (
 type BrokerProvider interface {
 	GetVHost(vhostName string) *vhost.VHost
 	ListVHosts() []*vhost.VHost
-	ListVhostDetails() ([]models.VHostDTO, error)
 	CreateVhostDto(vh *vhost.VHost) (models.VHostDTO, error)
 	CreateVHost(name string) error
 	DeleteVHost(name string) error

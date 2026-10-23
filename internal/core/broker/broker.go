@@ -545,23 +545,6 @@ func (b *Broker) Shutdown() {
 	}
 }
 
-// ListVhostDetails returns details of all vhosts in the broker.
-func (b *Broker) ListVhostDetails() ([]models.VHostDTO, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	// create a map with vhost name to channel info
-	vhosts := make([]models.VHostDTO, 0, len(b.vhosts))
-	// channelsPerVhost := make(map[string]models.ChannelInfo)
-	for _, vh := range b.vhosts {
-		VHostDTO, err := b.CreateVhostDto(vh)
-		if err != nil {
-			return nil, err
-		}
-		vhosts = append(vhosts, VHostDTO)
-	}
-	return vhosts, nil
-}
-
 func (b *Broker) CreateVhostDto(vh *vhost.VHost) (models.VHostDTO, error) {
 	channels, err := b.ListChannels(vh.Name)
 	if err != nil {
