@@ -3,7 +3,6 @@ package amqp
 import (
 	"bytes"
 	"encoding/binary"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -164,18 +163,6 @@ func EncodeOctet(buf *bytes.Buffer, value uint8) error {
 func EncodeTimestamp(buf *bytes.Buffer, value time.Time) error {
 	timestamp := value.Unix()
 	return binary.Write(buf, binary.BigEndian, timestamp)
-}
-
-func EncodeSecurityPlain(buf *bytes.Buffer, securityStr string) []byte {
-	// Concatenate username, null byte, and password
-	// securityStr := username + "\x00" + password
-	// Replace spaces with null bytes
-	encodedStr := strings.ReplaceAll(securityStr, " ", "\x00")
-	// Encode length as a uint32 and append the encoded string
-	length := uint32(len(encodedStr))
-	_ = binary.Write(buf, binary.BigEndian, length)
-	buf.WriteString(encodedStr)
-	return buf.Bytes()
 }
 
 // EncodeFlags encodes a map of boolean flags into a single byte
