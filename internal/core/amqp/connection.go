@@ -89,7 +89,11 @@ func createConnectionStartFrame(cfg HandshakeConfig) ([]byte, error) {
 	EncodeLongStr(&payloadBuf, []byte(cfg.Locales[0]))
 
 	frame := formatMethodFrame(channelNum, classID, methodID, payloadBuf.Bytes())
-	log.Trace().Msgf("Sending CONNECTION_START frame: %v", frame)
+	log.Trace().
+		Int("frame_size", len(frame)).
+		Str("mechanism", cfg.Mechanisms[0]).
+		Str("locale", cfg.Locales[0]).
+		Msg("Sending CONNECTION_START frame")
 	return frame, nil
 }
 

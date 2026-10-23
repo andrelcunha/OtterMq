@@ -163,7 +163,7 @@ func (vh *VHost) routeLocked(exchangeName, routingKey string, msg *Message) (*Ex
 		return nil, nil, fmt.Errorf("cannot publish to internal exchange %s", exchangeName)
 	}
 
-	log.Trace().Str("id", msg.ID).Str("exchange", exchangeName).Str("routing_key", routingKey).Str("body", string(msg.Body)).Interface("properties", msg.Properties).Msg("Publishing message")
+	log.Trace().Str("id", msg.ID).Str("exchange", exchangeName).Str("routing_key", routingKey).Int("body_size", len(msg.Body)).Interface("properties", msg.Properties).Msg("Publishing message")
 
 	msgProps := convertToPersistedProperties(msg.Properties)
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -17,6 +18,23 @@ type ChannelState struct {
 	Body           []byte
 	BodySize       uint64
 	ClosingChannel bool
+}
+
+// MarshalZerologObject logs the state's method and sizes, never the message
+// body or the method's arguments.
+func (s *ChannelState) MarshalZerologObject(e *zerolog.Event) {
+	if s == nil {
+		return
+	}
+	if s.MethodFrame != nil {
+		e.Uint16("channel", s.MethodFrame.Channel).
+			Uint16("class_id", s.MethodFrame.ClassID).
+			Uint16("method_id", s.MethodFrame.MethodID)
+	}
+	e.Bool("has_header", s.HeaderFrame != nil).
+		Uint64("body_size", s.BodySize).
+		Int("body_len", len(s.Body)).
+		Bool("closing_channel", s.ClosingChannel)
 }
 
 type HeaderFrame struct {

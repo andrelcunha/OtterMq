@@ -157,7 +157,7 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 	}
 	if currentState.MethodFrame != request { // request is "newState.MethodFrame"
 		b.updateChannelState(conn, channel, func(st *amqp.ChannelState) { st.MethodFrame = request })
-		log.Trace().Interface("state", b.getCurrentState(conn, channel)).Msg("Current state after update method")
+		log.Trace().Object("state", b.getCurrentState(conn, channel)).Msg("Current state after update method")
 		return nil, nil
 	}
 	// if the class and method are not the same as the current state,
@@ -167,7 +167,7 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 			st.HeaderFrame = newState.HeaderFrame
 			st.BodySize = newState.HeaderFrame.BodySize
 		})
-		log.Trace().Interface("state", b.getCurrentState(conn, channel)).Msg("Current state after update header")
+		log.Trace().Object("state", b.getCurrentState(conn, channel)).Msg("Current state after update header")
 		return nil, nil
 	}
 	if currentState.Body == nil && newState.Body != nil {
@@ -175,9 +175,9 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 		// Append the new body to the current body
 		b.updateChannelState(conn, channel, func(st *amqp.ChannelState) { st.Body = newState.Body })
 	}
-	log.Trace().Interface("state", currentState).Msg("Current state after all")
+	log.Trace().Object("state", currentState).Msg("Current state after all")
 	if currentState.MethodFrame.Content != nil && currentState.HeaderFrame != nil && currentState.BodySize > 0 && currentState.Body != nil {
-		log.Trace().Interface("state", currentState).Msg("All fields must be filled")
+		log.Trace().Object("state", currentState).Msg("All fields must be filled")
 		if len(currentState.Body) != int(currentState.BodySize) {
 			log.Trace().Int("body_len", len(currentState.Body)).Uint64("expected", currentState.BodySize).Msg("Body size is not correct")
 			return b.sendConnectionClosing(
@@ -245,7 +245,7 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 		_, err = vh.Publish(exchange, routingKey, &msg)
 		if err == nil {
 			// routed successfully
-			log.Trace().Str("exchange", exchange).Str("routing_key", routingKey).Str("body", string(body)).Msg("Published message")
+			log.Trace().Str("exchange", exchange).Str("routing_key", routingKey).Int("body_size", len(body)).Msg("Published message")
 			b.resetChannelState(conn, channel)
 			user := b.connUser(conn)
 			b.collector.RecordChannelPublish(conn.RemoteAddr().String(), vh.Name, user, channel)
