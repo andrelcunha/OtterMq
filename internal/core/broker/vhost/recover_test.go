@@ -367,7 +367,7 @@ func TestRedeliveredMarkLifecycle(t *testing.T) {
 	}
 }
 
-func TestHandleBasicRecover_RequeueFalse_BasicGetSentinel(t *testing.T) {
+func TestHandleBasicRecover_RequeueFalse_BasicGet(t *testing.T) {
 	vh := setupTestVHost()
 	connID := newTestConsumerConnID()
 
@@ -377,11 +377,12 @@ func TestHandleBasicRecover_RequeueFalse_BasicGetSentinel(t *testing.T) {
 		t.Fatalf("CreateQueue failed: %v", err)
 	}
 
-	// Setup channel delivery state with Basic.Get unacked message (using sentinel)
+	// Setup channel delivery state with a Basic.Get unacked message
 	key := ConnectionChannelKey{connID, 1}
 	ch := &ChannelDeliveryState{
 		UnackedByTag:      make(map[uint64]*DeliveryRecord),
 		UnackedByConsumer: make(map[string]map[uint64]*DeliveryRecord),
+		UnackedByGet:      make(map[uint64]*DeliveryRecord),
 	}
 	vh.mu.Lock()
 	vh.ChannelDeliveries[key] = ch
@@ -391,19 +392,16 @@ func TestHandleBasicRecover_RequeueFalse_BasicGetSentinel(t *testing.T) {
 	ch.mu.Lock()
 	record := &DeliveryRecord{
 		DeliveryTag: 1,
-		ConsumerTag: BASIC_GET_SENTINEL, // Basic.Get uses sentinel
+		FromGet:     true,
 		QueueName:   "q1",
 		Message:     m1,
 	}
 	ch.UnackedByTag[1] = record
-	if ch.UnackedByConsumer[BASIC_GET_SENTINEL] == nil {
-		ch.UnackedByConsumer[BASIC_GET_SENTINEL] = make(map[uint64]*DeliveryRecord)
-	}
-	ch.UnackedByConsumer[BASIC_GET_SENTINEL][1] = record
+	ch.UnackedByGet[1] = record
 	ch.mu.Unlock()
 
 	// Call recover with requeue=false
-	// Since BASIC_GET_SENTINEL has no consumer, it should requeue the message
+	// Since a Basic.Get delivery has no consumer, it should requeue the message
 	if err := vh.HandleBasicRecover(connID, 1, false); err != nil {
 		t.Fatalf("HandleBasicRecover failed: %v", err)
 	}
@@ -411,13 +409,13 @@ func TestHandleBasicRecover_RequeueFalse_BasicGetSentinel(t *testing.T) {
 	// Verify unacked is cleared
 	ch.mu.Lock()
 	unackedCount := len(ch.UnackedByTag)
-	sentinelUnacked := len(ch.UnackedByConsumer[BASIC_GET_SENTINEL])
+	getUnacked := len(ch.UnackedByGet)
 	ch.mu.Unlock()
 	if unackedCount != 0 {
 		t.Errorf("expected 0 unacked after recover, got %d", unackedCount)
 	}
-	if sentinelUnacked != 0 {
-		t.Errorf("expected 0 sentinel unacked after recover, got %d", sentinelUnacked)
+	if getUnacked != 0 {
+		t.Errorf("expected 0 basic.get unacked after recover, got %d", getUnacked)
 	}
 
 	// Verify message was requeued (not redelivered, since Basic.Get has no consumer)
