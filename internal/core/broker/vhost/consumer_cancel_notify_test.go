@@ -68,14 +68,6 @@ func (s *cancelNotifySender) sent() ([]sentCancel, bool) {
 	return append([]sentCancel(nil), s.cancels...), s.underLock
 }
 
-// sentAfter waits until n basic.cancel were sent (they are written
-// asynchronously), then a little longer to catch extra ones.
-func (s *cancelNotifySender) sentAfter(n int) ([]sentCancel, bool) {
-	waitFor(2*time.Second, func() bool { c, _ := s.sent(); return len(c) >= n })
-	time.Sleep(50 * time.Millisecond)
-	return s.sent()
-}
-
 func cancelTestQueueProps() *QueueProperties {
 	return &QueueProperties{Arguments: map[string]any{}}
 }
@@ -123,7 +115,8 @@ func TestDeleteQueueSendsBasicCancelToNotifyingClients(t *testing.T) {
 		t.Fatalf("DeleteQueuebyName: %v", err)
 	}
 
-	cancels, underLock := sender.sentAfter(1)
+	// Written before DeleteQueuebyName returns, so before queue.delete-ok.
+	cancels, underLock := sender.sent()
 	want := sentCancel{notifying, 1, "a"}
 	if len(cancels) != 1 || cancels[0] != want {
 		t.Errorf("basic.cancel sent = %+v, want only %+v", cancels, want)
@@ -145,7 +138,7 @@ func TestDeleteQueueSendsNoBasicCancelWithoutCapability(t *testing.T) {
 	if err := vh.DeleteQueuebyName("q"); err != nil {
 		t.Fatalf("DeleteQueuebyName: %v", err)
 	}
-	if cancels, _ := sender.sentAfter(0); len(cancels) != 0 {
+	if cancels, _ := sender.sent(); len(cancels) != 0 {
 		t.Errorf("basic.cancel sent = %+v, want none", cancels)
 	}
 }
@@ -167,7 +160,7 @@ func TestCleanupConnectionNotifiesOnlyOtherConnections(t *testing.T) {
 
 	vh.CleanupConnection(owner)
 
-	cancels, underLock := sender.sentAfter(1)
+	cancels, underLock := sender.sent()
 	want := sentCancel{other, 2, "foreign"}
 	if len(cancels) != 1 || cancels[0] != want {
 		t.Errorf("basic.cancel sent = %+v, want only %+v", cancels, want)
@@ -199,13 +192,14 @@ func TestAutoDeleteQueueSendsNoBasicCancel(t *testing.T) {
 	if queueExists(vh, "auto") {
 		t.Fatal("the auto-delete queue was not deleted")
 	}
-	if cancels, _ := sender.sentAfter(0); len(cancels) != 0 {
+	if cancels, _ := sender.sent(); len(cancels) != 0 {
 		t.Errorf("basic.cancel sent = %+v, want none", cancels)
 	}
 }
 
-// A client that stopped reading holds up neither the queue deletion that
-// removed its consumer nor the notification of other clients.
+// A client that stopped reading holds up the queue deletion that removed its
+// consumer for at most cancelNotifyWait, and the other clients are notified
+// before it returns.
 func TestDeleteQueueIsNotHeldUpByUnresponsiveClient(t *testing.T) {
 	stuck, other := newTestConsumerConnID(), newTestConsumerConnID()
 	vh, sender := newCancelNotifyVHost(t, map[ConnectionID]bool{stuck: true, other: true})
@@ -219,9 +213,9 @@ func TestDeleteQueueIsNotHeldUpByUnresponsiveClient(t *testing.T) {
 	registerNoAck(t, vh, stuck, 1, "q", "stuck")
 	registerNoAck(t, vh, other, 2, "q", "other")
 
-	deleteWithin(t, vh, "q", time.Second)
+	deleteWithin(t, vh, "q", 3*cancelNotifyWait)
 
-	cancels, _ := sender.sentAfter(1)
+	cancels, _ := sender.sent()
 	want := sentCancel{other, 2, "other"}
 	if len(cancels) != 1 || cancels[0] != want {
 		t.Errorf("basic.cancel sent = %+v, want %+v while the stuck client blocks", cancels, want)

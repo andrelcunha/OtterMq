@@ -3,7 +3,9 @@ package vhost
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -360,12 +362,18 @@ func (vh *VHost) consumerCancelsLocked(removed []*Consumer, skipConn ConnectionI
 	return cancels
 }
 
+// cancelNotifyWait bounds how long send waits for the basic.cancel writes.
+const cancelNotifyWait = time.Second
+
 // send writes basic.cancel to each consumer whose client advertised
 // consumer_cancel_notify. Others are not told, as the capability requires.
-// It doesn't wait for the writes: they go out on one goroutine per
-// connection, so a client that stopped reading can't hold up the queue
-// deletion or connection cleanup that removed its consumers, nor the
-// notification of the others. Frame writes have no deadline yet (#244).
+// The writes go out on one goroutine per connection, and send waits for
+// them, so they normally precede whatever the caller sends next (such as
+// queue.delete-ok, or a consume-ok reusing the tag). It waits at most
+// cancelNotifyWait: a client that stopped reading must not hold up the
+// queue deletion or connection cleanup that removed its consumers, and
+// frame writes have no deadline yet (#244). Such a client isn't reading
+// what follows either.
 func (cc consumerCancels) send() {
 	if cc.sender == nil || cc.framer == nil {
 		return
@@ -376,8 +384,14 @@ func (cc consumerCancels) send() {
 			byConn[c.ConnectionID] = append(byConn[c.ConnectionID], c)
 		}
 	}
+	if len(byConn) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
 	for connID, consumers := range byConn {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for _, c := range consumers {
 				frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
 				if err := cc.sender.SendFrame(connID, c.Channel, frame); err != nil {
@@ -389,6 +403,16 @@ func (cc consumerCancels) send() {
 				}
 			}
 		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(cancelNotifyWait):
+		log.Warn().Msg("basic.cancel not written within 1s: a client is not reading")
 	}
 }
 
