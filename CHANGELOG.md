@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- One client that had stopped reading could stall broker shutdown, and with it new connections and
+  the management API: the shutdown `connection.close` was written to every client while holding the
+  broker lock, with no time limit. The frames are now sent after the lock is released, with a 1s
+  write deadline per client, and a client that doesn't take its frame in time is disconnected (#313).
 - A crash during the first start, or two brokers starting at once on a fresh data dir, could
   leave an empty `jwt.key`, and the broker then refused to start until the file was removed. The
   generated key is now written to a temp file and linked into place, so `jwt.key` is either
