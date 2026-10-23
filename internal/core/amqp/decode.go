@@ -512,35 +512,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-
-func DecodeSecurityPlain(buf *bytes.Reader) (string, error) {
-	var strLen uint32
-	err := binary.Read(buf, binary.BigEndian, &strLen)
-	if err != nil {
-		return "", err
-	}
-
-	if uint32(buf.Len()) < strLen {
-		log.Debug().Int("buf_len", buf.Len()).Msg("Reached EOF")
-		return "", io.EOF
-	}
-
-	// Read each byte and replace 0x00 with a space
-	strData := make([]byte, strLen)
-	for i := uint32(0); i < strLen; i++ {
-		b, err := buf.ReadByte()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return "", err
-		}
-		if b == 0x00 {
-			strData[i] = ' '
-		} else {
-			strData[i] = b
-		}
-	}
-
-	return string(strData), nil
-}

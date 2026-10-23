@@ -162,7 +162,8 @@ func parseConnectionMethod(methodID uint16, payload []byte) (any, error) {
 		return parseConnectionStartFrame(payload)
 
 	case uint16(CONNECTION_START_OK):
-		log.Trace().Bytes("payload", payload).Msg("Received connection.start-ok")
+		// The payload holds the PLAIN response, and so the password: never log it
+		log.Trace().Msg("Received connection.start-ok")
 		return parseConnectionStartOkFrame(payload)
 
 	case uint16(CONNECTION_TUNE_OK):
@@ -391,7 +392,8 @@ func parseConnectionStartOkFrame(payload []byte) (*ConnectionStartOk, error) {
 		return nil, fmt.Errorf("unsupported mechanism: %s", mechanism)
 	}
 
-	security, err := DecodeSecurityPlain(buf)
+	// The PLAIN response is kept as raw bytes: its NULs separate the fields.
+	security, err := DecodeLongStr(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode security: %v", err)
 	}

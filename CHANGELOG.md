@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- With `LOG_LEVEL=debug`, every AMQP login wrote the client's username and password to the log
-  in plain text. The `connection.start-ok` response is no longer logged.
+- With `LOG_LEVEL=debug` or `trace`, every AMQP login wrote the client's username and password to
+  the log in plain text. Neither the `connection.start-ok` response nor its raw payload is logged
+  any more.
 - Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
   2.52.15 (GO-2026-4543, GO-2025-3845, GO-2025-3706), golang-jwt 5.3.1 (GO-2025-3553), plus
   fasthttp 1.76.0 and golang.org/x/crypto 0.58.0. `govulncheck ./...` now reports none (#207).
@@ -70,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AMQP login rejected passwords and usernames containing spaces, and clients that send a PLAIN
+  authorization identity equal to the username: the PLAIN response was split on spaces instead of
+  on its NUL separators. It is now parsed as RFC 4616 `authzid NUL authcid NUL passwd`; an
+  authorization identity other than the username is still refused (#326).
 - Cleaning up a channel's vhost state while that channel ran `tx.commit` deadlocked the vhost, as
   the two took the vhost lock and the transaction lock in opposite orders. No released code path
   cleans up a single channel yet, so this is a latent fix ahead of the channel-close cleanup in #219
