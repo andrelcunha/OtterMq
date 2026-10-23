@@ -32,10 +32,7 @@ func newTestHTTPBroker() *broker.Broker {
 	vh.SetFramer(&amqp.DefaultFramer{})
 	vh.SetMetricsCollector(metrics.NewMockCollector(nil))
 
-	b := &broker.Broker{
-		VHosts:     map[string]*vhost.VHost{"/": vh},
-		Management: nil,
-	}
+	b := broker.NewBrokerForVHosts(vh)
 	b.Management = management.NewService(b)
 	return b
 }

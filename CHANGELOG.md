@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A panic in a web API handler now fails only that request with a 500 and is logged with its
   stack trace. Before, it ended the whole process, taking the AMQP broker down with the web API.
   The Prometheus metrics server recovers the same way (#207).
+- Publishing while the management API lists channels or connections no longer risks aborting the
+  broker with `fatal error: concurrent map read and map write`, which can't be recovered. Every
+  broker map is now read and written under its lock, and a connection that disappears while one of
+  its requests is in flight is treated as gone instead of panicking (#216).
 
 ## [v0.21.1]
 

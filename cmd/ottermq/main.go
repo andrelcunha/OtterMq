@@ -51,7 +51,7 @@ func main() {
 
 	//Get or create the user in the database
 	user, err := setupUserDatabase(dataDir, cfg)
-	b.VHosts["/"].Users[user.Username] = &user
+	b.GetVHost("/").Users[user.Username] = &user
 
 	var promServer *prometheus.Server = nil
 	if cfg.EnableMetrics && mtrx != nil {

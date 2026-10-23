@@ -81,7 +81,7 @@ func CheckVirtualHosts(c *fiber.Ctx, b *broker.Broker) error {
 		})
 	}
 	for _, v := range vhosts {
-		if b.VHosts[v.Name] == nil {
+		if b.GetVHost(v.Name) == nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(models.HealthCheckResponse{
 				Status: "failed",
 				Reason: fmt.Sprintf("virtual host '%s' is not initialised", v.Name),

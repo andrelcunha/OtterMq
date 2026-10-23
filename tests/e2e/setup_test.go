@@ -120,7 +120,7 @@ func setupBroker() error {
 	testBrokerCtx, testBrokerStop = context.WithCancel(context.Background())
 	collector := metrics.NewMockCollector(nil)
 	testBroker = broker.NewBroker(cfg, testBrokerCtx, testBrokerStop, collector)
-	testBroker.VHosts["/"].Users[dbUser.Username] = &dbUser
+	testBroker.GetVHost("/").Users[dbUser.Username] = &dbUser
 
 	// Start broker in background
 	go func() {

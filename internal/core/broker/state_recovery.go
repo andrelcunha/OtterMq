@@ -60,7 +60,9 @@ func RecoverBrokerState(b *Broker) error {
 				}
 			}
 		}
-		b.VHosts[vhostName] = v
+		b.mu.Lock()
+		b.vhosts[vhostName] = v
+		b.mu.Unlock()
 	}
 	return nil
 }

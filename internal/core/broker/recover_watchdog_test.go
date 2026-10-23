@@ -53,7 +53,7 @@ func TestPanicWithBrokerLockHeldExits(t *testing.T) {
 }
 
 // Another cleanup of the same connection may win the race, remove it from
-// b.Connections and then block on a lock the panic left held. The watchdog
+// b.connInfos and then block on a lock the panic left held. The watchdog
 // must still fire.
 func TestPanicWatchdogFiresWhenAnotherCleanupIsStuck(t *testing.T) {
 	fatal := make(chan string, 1)
@@ -68,7 +68,7 @@ func TestPanicWatchdogFiresWhenAnotherCleanupIsStuck(t *testing.T) {
 			// ...and a concurrent cleanup has already taken the connection.
 			b.mu.Lock()
 			var conns []net.Conn
-			for c := range b.Connections {
+			for c := range b.connInfos {
 				conns = append(conns, c)
 			}
 			b.mu.Unlock()
@@ -77,7 +77,7 @@ func TestPanicWatchdogFiresWhenAnotherCleanupIsStuck(t *testing.T) {
 			}
 			for {
 				b.mu.Lock()
-				n := len(b.Connections)
+				n := len(b.connInfos)
 				b.mu.Unlock()
 				if n == 0 {
 					return

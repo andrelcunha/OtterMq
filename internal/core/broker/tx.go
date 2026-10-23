@@ -120,7 +120,7 @@ func (b *Broker) txCommitHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 			}
 			// No routing and not mandatory - silently drop the message
 			log.Debug().Str("exchange", exchange).Str("routing_key", routingKey).Msg("No route for message, silently dropped (not mandatory)")
-			b.Connections[conn].Channels[channel] = &amqp.ChannelState{}
+			b.resetChannelState(conn, channel)
 			continue
 		}
 		msgID := vhost.GenerateMessageId()

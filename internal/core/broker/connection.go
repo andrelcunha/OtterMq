@@ -21,7 +21,7 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 	defer func() {
 		defer b.ActiveConns.Done()
 		b.mu.Lock()
-		_, exists := b.Connections[conn]
+		_, exists := b.connInfos[conn]
 		b.mu.Unlock()
 		if !exists {
 			log.Debug().Msg("No connections to clean")
@@ -107,17 +107,13 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 			}
 
 			// check if connection still exists
-			b.mu.Lock()
-			connInfo, exists := b.Connections[conn]
-			b.mu.Unlock()
-
-			if !exists {
+			if _, exists := b.getConnInfo(conn); !exists {
 				log.Debug().Msg("Connection already cleaned up, stopping frame processing")
 				client.Cancel()
 				return
 			}
 
-			if previousState, exists := connInfo.Channels[channelNum]; exists {
+			if previousState, exists := b.channelState(conn, channelNum); exists {
 				newState.MethodFrame = previousState.MethodFrame
 				log.Trace().Interface("method_frame", previousState.MethodFrame).Msg("Recovered method frame")
 			} else {
@@ -157,7 +153,7 @@ func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo
 		b.mu.Unlock()
 		return false
 	}
-	b.Connections[conn] = connInfo
+	b.connInfos[conn] = connInfo
 	b.mu.Unlock()
 
 	// Register connection ID in bidirectional maps
@@ -173,14 +169,14 @@ func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo
 
 func (b *Broker) cleanupConnection(conn net.Conn) {
 	b.mu.Lock()
-	connInfo, ok := b.Connections[conn]
+	connInfo, ok := b.connInfos[conn]
 	if !ok {
 		b.mu.Unlock()
-		log.Debug().Msg("cleanupConnection: connection not found in b.Connections")
+		log.Debug().Msg("cleanupConnection: connection not found in b.connInfos")
 		return
 	}
 	vhName := connInfo.VHostName
-	delete(b.Connections, conn)
+	delete(b.connInfos, conn)
 	b.mu.Unlock()
 
 	// Remove from bidirectional maps
@@ -208,7 +204,7 @@ func (b *Broker) closeConnectionRequested(request *amqp.RequestMethodMessage, co
 	frame := b.framer.CreateConnectionCloseOkFrame(request.Channel)
 	err := b.framer.SendFrame(conn, frame)
 	b.mu.Lock()
-	connInfo, exists := b.Connections[conn]
+	connInfo, exists := b.connInfos[conn]
 	if !exists {
 		b.mu.Unlock()
 		return nil, nil
@@ -221,7 +217,7 @@ func (b *Broker) closeConnectionRequested(request *amqp.RequestMethodMessage, co
 func (b *Broker) isConnectionClosing(conn net.Conn) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	connInfo, exists := b.Connections[conn]
+	connInfo, exists := b.connInfos[conn]
 	if !exists {
 		return false, fmt.Errorf("connection not found")
 	}
@@ -254,7 +250,7 @@ func (b *Broker) registerHeartbeat(client *amqp.AmqpClient) bool {
 func (b *Broker) BroadcastConnectionClose() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for conn := range b.Connections {
+	for conn := range b.connInfos {
 		if _, err := b.sendConnectionClosing(conn, 0, uint16(amqp.CONNECTION_FORCED), 0, 0, amqp.ReplyText[amqp.CONNECTION_FORCED]); err != nil {
 			log.Error().Err(err).Msg("Failed to send close connection")
 		}
@@ -277,7 +273,7 @@ func (b *Broker) connectionHandler(request *amqp.RequestMethodMessage, conn net.
 // sendChannelClosing sends `channel.close` when the server raises a channel exception or needs to close the channel for some reason
 func (b *Broker) sendChannelClosing(conn net.Conn, channel, replyCode, classId, methodId uint16, replyText string) error {
 	b.mu.Lock()
-	connInfo, exists := b.Connections[conn]
+	connInfo, exists := b.connInfos[conn]
 	if !exists {
 		b.mu.Unlock()
 		return fmt.Errorf("connection not found")

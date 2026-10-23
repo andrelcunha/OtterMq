@@ -154,7 +154,7 @@ func startTestBroker(t *testing.T, modify func(*config.Config), setup func(*Brok
 	if err != nil {
 		t.Fatalf("get user: %v", err)
 	}
-	b.VHosts[DEFAULT_VHOST].Users[user.Username] = &user
+	b.vhosts[DEFAULT_VHOST].Users[user.Username] = &user
 
 	ff := &faultyFramer{Framer: b.framer}
 	b.framer = ff
@@ -174,7 +174,7 @@ func startTestBroker(t *testing.T, modify func(*config.Config), setup func(*Brok
 		cancel()
 		b.listener.Close()
 		b.mu.Lock()
-		for conn := range b.Connections {
+		for conn := range b.connInfos {
 			conn.Close()
 		}
 		b.mu.Unlock()

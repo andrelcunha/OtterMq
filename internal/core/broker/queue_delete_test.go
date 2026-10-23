@@ -24,7 +24,7 @@ func TestQueueDeleteHandler_IfUnusedBlocksWhenConsumersExist(t *testing.T) {
 	}, context.Background())
 	b := &Broker{
 		framer:      &amqp.DefaultFramer{},
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
+		connInfos:   make(map[net.Conn]*amqp.ConnectionInfo),
 		collector:   mockCollector,
 	}
 	var options = vhost.VHostOptions{
@@ -52,7 +52,7 @@ func TestQueueDeleteHandler_IfUnusedBlocksWhenConsumersExist(t *testing.T) {
 
 	// Prepare broker connection/channel state for channel.close
 	b.mu.Lock()
-	b.Connections[connOwner] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
+	b.connInfos[connOwner] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
 	b.mu.Unlock()
 
 	// Initialize and register connection ID in broker's map
@@ -83,7 +83,7 @@ func TestQueueDeleteHandler_IfUnusedBlocksWhenConsumersExist(t *testing.T) {
 
 	// Channel should be marked closing
 	b.mu.Lock()
-	if !b.Connections[connOwner].Channels[1].ClosingChannel {
+	if !b.connInfos[connOwner].Channels[1].ClosingChannel {
 		b.mu.Unlock()
 		t.Fatalf("expected channel to be marked closing")
 	}
@@ -96,7 +96,7 @@ func TestQueueDeleteHandler_IfUnusedBlocksWhenConsumersExist(t *testing.T) {
 }
 
 func TestQueueDeleteHandler_IfEmptyBlocksWhenMessagesExist(t *testing.T) {
-	b := &Broker{framer: &amqp.DefaultFramer{}, Connections: make(map[net.Conn]*amqp.ConnectionInfo)}
+	b := &Broker{framer: &amqp.DefaultFramer{}, connInfos: make(map[net.Conn]*amqp.ConnectionInfo)}
 	var options = vhost.VHostOptions{
 		QueueBufferSize: 100,
 		Persistence:     &dummy.DummyPersistence{},
@@ -114,7 +114,7 @@ func TestQueueDeleteHandler_IfEmptyBlocksWhenMessagesExist(t *testing.T) {
 	q.Push(vhost.Message{ID: "1", Body: []byte("A")})
 
 	b.mu.Lock()
-	b.Connections[conn] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
+	b.connInfos[conn] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
 	b.mu.Unlock()
 
 	// Initialize and register connection ID
@@ -144,7 +144,7 @@ func TestQueueDeleteHandler_IfEmptyBlocksWhenMessagesExist(t *testing.T) {
 
 	// Channel should be closing
 	b.mu.Lock()
-	if !b.Connections[conn].Channels[1].ClosingChannel {
+	if !b.connInfos[conn].Channels[1].ClosingChannel {
 		b.mu.Unlock()
 		t.Fatalf("expected channel to be marked closing")
 	}
@@ -162,7 +162,7 @@ func TestQueueDeleteHandler_SuccessDeletesQueueAndSendsOk(t *testing.T) {
 	}, context.Background())
 	b := &Broker{
 		framer:      &amqp.DefaultFramer{},
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
+		connInfos:   make(map[net.Conn]*amqp.ConnectionInfo),
 		collector:   mockCollector,
 	}
 	var options = vhost.VHostOptions{
@@ -221,7 +221,7 @@ func TestQueueDeleteHandler_SuccessDeletesQueueAndSendsOk(t *testing.T) {
 }
 
 func TestQueueDeleteHandler_ExclusiveOwnerMismatch_AccessRefused(t *testing.T) {
-	b := &Broker{framer: &amqp.DefaultFramer{}, Connections: make(map[net.Conn]*amqp.ConnectionInfo)}
+	b := &Broker{framer: &amqp.DefaultFramer{}, connInfos: make(map[net.Conn]*amqp.ConnectionInfo)}
 	var options = vhost.VHostOptions{
 		QueueBufferSize: 100,
 		Persistence:     &dummy.DummyPersistence{},
@@ -244,7 +244,7 @@ func TestQueueDeleteHandler_ExclusiveOwnerMismatch_AccessRefused(t *testing.T) {
 	foreign := &mockConn{}
 	foreignID := newTestConsumerConnID()
 	b.mu.Lock()
-	b.Connections[foreign] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
+	b.connInfos[foreign] = &amqp.ConnectionInfo{Channels: map[uint16]*amqp.ChannelState{1: {}}}
 	b.mu.Unlock()
 
 	// Initialize and register foreign connection ID
@@ -274,7 +274,7 @@ func TestQueueDeleteHandler_ExclusiveOwnerMismatch_AccessRefused(t *testing.T) {
 
 	// Channel should be closing due to ACCESS_REFUSED
 	b.mu.Lock()
-	if !b.Connections[foreign].Channels[1].ClosingChannel {
+	if !b.connInfos[foreign].Channels[1].ClosingChannel {
 		b.mu.Unlock()
 		t.Fatalf("expected channel to be marked closing")
 	}
