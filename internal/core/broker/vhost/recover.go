@@ -37,10 +37,11 @@ func (vh *VHost) HandleBasicRecover(connID ConnectionID, channel uint16, requeue
 			log.Debug().Msgf("Requeuing message with delivery tag %d on channel %d\n", record.DeliveryTag, channel)
 			vh.requeueMessage(record)
 		} else {
-			// Basic.Recover with requeue=false: redeliver to original consumer
-			// Basic.Get deliveries have no consumer to redeliver to
-			if record.FromGet {
-				log.Debug().Msg("Skipping Basic.Get delivery on Basic.Recover(requeue=false), requeuing")
+			// Basic.Recover with requeue=false: redeliver to original consumer.
+			// Basic.Get deliveries and a cancelled consumer's have no consumer
+			// to redeliver to (one reusing the tag is another consumer).
+			if record.FromGet || record.ConsumerCancelled {
+				log.Debug().Msg("No consumer for delivery on Basic.Recover(requeue=false), requeuing")
 				vh.requeueMessage(record)
 				continue
 			}

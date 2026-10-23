@@ -192,6 +192,9 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 	return consumer.Tag, nil
 }
 
+// CancelConsumer handles basic.cancel. The consumer's unacked deliveries
+// stay on the channel. It doesn't wait for a delivery in flight to the
+// consumer (#218).
 func (vh *VHost) CancelConsumer(channel uint16, tag string) error {
 	return vh.cancelConsumer(channel, tag, nil)
 }
@@ -210,17 +213,16 @@ func (vh *VHost) removeFailedConsumer(q *Queue, consumer *Consumer) error {
 // cancelConsumer removes a consumer. The queue's delivery loop keeps running
 // (it idles without consumers). If guard is set, it is checked with vh.mu
 // held and the cancel is skipped when it returns false. The consumer's
-// unacked messages are requeued after vh.mu is released.
+// unacked deliveries stay on its channel.
 func (vh *VHost) cancelConsumer(channel uint16, tag string, guard func() bool) error {
 	key := ConsumerKey{channel, tag}
 	vh.mu.Lock()
+	defer vh.mu.Unlock()
 	if guard != nil && !guard() {
-		vh.mu.Unlock()
 		return nil
 	}
 	consumer, exists := vh.Consumers[key]
 	if !exists {
-		vh.mu.Unlock()
 		return errors.NewChannelError(
 			fmt.Sprintf("no consumer '%s' on channel %d", tag, channel),
 			uint16(amqp.NOT_FOUND),
@@ -228,10 +230,7 @@ func (vh *VHost) cancelConsumer(channel uint16, tag string, guard func() bool) e
 			uint16(amqp.BASIC_CANCEL),
 		)
 	}
-	work := vh.cancelConsumerLocked(key, consumer)
-	vh.mu.Unlock()
-
-	vh.requeue(work)
+	vh.cancelConsumerLocked(key, consumer)
 	return nil
 }
 
@@ -258,34 +257,17 @@ func (vh *VHost) requeue(work []requeueWork) {
 	}
 }
 
-// cancelConsumerLocked removes the consumer from every index, takes its
-// unacked deliveries and deletes its queue if that was the last consumer of
-// an auto-delete queue. The caller holds vh.mu and must pass the returned
-// work to requeue after releasing it.
-func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []requeueWork {
+// cancelConsumerLocked removes the consumer from every index, detaches its
+// unacked deliveries (they stay on the channel, see
+// detachConsumerDeliveries) and deletes its queue if that was the last
+// consumer of an auto-delete queue. The caller holds vh.mu.
+func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) {
 	consumer.Active.Store(false)
 	delete(vh.Consumers, key)
 
-	var work []requeueWork
 	channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
 	if state := vh.ChannelDeliveries[channelKey]; state != nil {
-		records := takeUnackedForConsumer(state, consumer.Tag)
-		if len(records) > 0 {
-			if queue, ok := vh.Queues[consumer.QueueName]; ok {
-				log.Debug().
-					Str("consumer", consumer.Tag).
-					Str("queue", consumer.QueueName).
-					Int("count", len(records)).
-					Msg("Requeuing unacked messages for canceled consumer")
-				work = append(work, requeueWork{queue: queue, records: records, redelivered: true})
-			} else {
-				log.Warn().
-					Str("consumer", consumer.Tag).
-					Str("queue", consumer.QueueName).
-					Int("count", len(records)).
-					Msg("Cannot requeue unacked messages: queue not found")
-			}
-		}
+		detachConsumerDeliveries(state, consumer.Tag)
 	}
 
 	// Remove from ConsumersByQueue
@@ -318,7 +300,6 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 			break
 		}
 	}
-	return work
 }
 
 // removeQueueConsumersLocked drops the consumers of a deleted queue from
@@ -452,23 +433,19 @@ func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
 	}
 }
 
-// takeUnackedForConsumer removes a consumer's unacked deliveries from the
-// channel state and returns them.
-func takeUnackedForConsumer(state *ChannelDeliveryState, consumerTag string) []*DeliveryRecord {
+// detachConsumerDeliveries marks a cancelled consumer's unacked deliveries
+// as such and drops them from UnackedByConsumer, keeping them in
+// UnackedByTag: basic.cancel only stops new deliveries, and the client can
+// still ack, nack or reject these. A consumer that reuses the tag doesn't
+// inherit them (in its prefetch, or on basic.recover). fetchUnackedMessages
+// still collects them, for channel and connection close and basic.recover.
+func detachConsumerDeliveries(state *ChannelDeliveryState, consumerTag string) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
-
-	consumerUnacked := state.UnackedByConsumer[consumerTag]
-	if len(consumerUnacked) == 0 {
-		return nil
+	for _, record := range state.UnackedByConsumer[consumerTag] {
+		record.ConsumerCancelled = true
 	}
 	delete(state.UnackedByConsumer, consumerTag)
-	records := make([]*DeliveryRecord, 0, len(consumerUnacked))
-	for deliveryTag, record := range consumerUnacked {
-		delete(state.UnackedByTag, deliveryTag)
-		records = append(records, record)
-	}
-	return records
 }
 
 // checkAutoDeleteQueueUnlocked checks if a queue is auto-delete and has no consumers, and deletes it if so.
@@ -530,7 +507,7 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 func (vh *VHost) ReleaseChannelDeliveries(connID ConnectionID, channel uint16) {
 	channelKey := ConnectionChannelKey{connID, channel}
 	vh.mu.Lock()
-	cancelled, work := vh.cancelChannelConsumersLocked(channelKey)
+	cancelled := vh.cancelChannelConsumersLocked(channelKey)
 	vh.mu.Unlock()
 
 	// A delivery that passed its Active check before the cancel holds the
@@ -544,7 +521,7 @@ func (vh *VHost) ReleaseChannelDeliveries(connID ConnectionID, channel uint16) {
 	// The delivery state is taken only now: such a delivery may have
 	// recreated it, after the cancel, before seeing the consumer inactive.
 	vh.mu.Lock()
-	work = append(work, vh.takeChannelDeliveriesLocked(channelKey)...)
+	work := vh.takeChannelDeliveriesLocked(channelKey)
 	vh.mu.Unlock()
 
 	vh.requeue(inDeliveryOrder(work))
@@ -606,23 +583,16 @@ func inDeliveryOrder(work []requeueWork) []requeueWork {
 	return merged
 }
 
-// fetchUnackedMessages returns the channel's unacked deliveries from
-// consumers and basic.get, leaving out those of deleted queues (which are
-// only in UnackedByTag). The caller holds state.mu.
+// fetchUnackedMessages returns the channel's unacked deliveries that can be
+// requeued: those of consumers (registered or cancelled) and of basic.get.
+// Deliveries of deleted queues are left out, even a cancelled consumer's.
+// The caller holds state.mu.
 func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
-	totalUnacked := len(state.UnackedByGet)
-	for _, consumeMap := range state.UnackedByConsumer {
-		totalUnacked += len(consumeMap)
-	}
-
-	records := make([]*DeliveryRecord, 0, totalUnacked)
-	for _, consumeMap := range state.UnackedByConsumer {
-		for _, record := range consumeMap {
+	records := make([]*DeliveryRecord, 0, len(state.UnackedByTag))
+	for _, record := range state.UnackedByTag {
+		if !record.QueueDeleted {
 			records = append(records, record)
 		}
-	}
-	for _, record := range state.UnackedByGet {
-		records = append(records, record)
 	}
 	return records
 }
@@ -630,25 +600,24 @@ func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
 // cancelChannelConsumersLocked cancels every consumer on a channel and
 // returns them. It only cancels a consumer still registered under its key:
 // keys are not connection-scoped (#220), so another connection's consumer
-// may hold the same channel number and tag. The caller holds vh.mu and must
-// pass the returned work to requeue after releasing it.
-func (vh *VHost) cancelChannelConsumersLocked(channelKey ConnectionChannelKey) ([]*Consumer, []requeueWork) {
+// may hold the same channel number and tag. Their unacked deliveries stay in
+// the channel's delivery state. The caller holds vh.mu.
+func (vh *VHost) cancelChannelConsumersLocked(channelKey ConnectionChannelKey) []*Consumer {
 	consumersForChannel := vh.ConsumersByChannel[channelKey]
 	consumersCopy := make([]*Consumer, len(consumersForChannel))
 	copy(consumersCopy, consumersForChannel)
 
 	var cancelled []*Consumer
-	var work []requeueWork
 	for _, c := range consumersCopy {
 		key := ConsumerKey{c.Channel, c.Tag}
 		if c.ConnectionID != channelKey.ConnectionID || vh.Consumers[key] != c {
 			continue // already cancelled, or not this connection's
 		}
-		work = append(work, vh.cancelConsumerLocked(key, c)...)
+		vh.cancelConsumerLocked(key, c)
 		cancelled = append(cancelled, c)
 	}
 	delete(vh.ConsumersByChannel, channelKey)
-	return cancelled, work
+	return cancelled
 }
 
 // connectionChannelsLocked returns every channel of connID that has
@@ -692,17 +661,17 @@ func (vh *VHost) CleanupConnection(connID ConnectionID) {
 	// for as CleanupChannel does.
 	var work []requeueWork
 	for _, channelKey := range vh.connectionChannelsLocked(connID) {
-		_, channelWork := vh.cancelChannelConsumersLocked(channelKey)
-		channelWork = append(channelWork, vh.takeChannelDeliveriesLocked(channelKey)...)
-		work = append(work, inDeliveryOrder(channelWork)...)
+		vh.cancelChannelConsumersLocked(channelKey)
+		work = append(work, inDeliveryOrder(vh.takeChannelDeliveriesLocked(channelKey))...)
 		// Nothing can reach a dropped transaction state: the connection is
 		// gone. It isn't reset here, since a commit may still hold its lock.
 		delete(vh.ChannelTransactions, channelKey)
 	}
 	// A consumer missing from ConsumersByChannel would have no channel above.
+	// Its channel's delivery state, if any, is already taken.
 	for key, consumer := range vh.Consumers {
 		if consumer.ConnectionID == connID {
-			work = append(work, vh.cancelConsumerLocked(key, consumer)...)
+			vh.cancelConsumerLocked(key, consumer)
 		}
 	}
 

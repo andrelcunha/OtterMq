@@ -118,11 +118,15 @@ func checkMaxLengthAfterRequeue(t *testing.T, q, dlq *Queue) {
 // Requeuing a cancelled consumer's unacked messages pushed them while holding
 // vh.mu. With x-max-length and a dead-letter exchange, the push evicts a
 // message and dead-letters it, which takes vh.mu again: the cancel deadlocked
-// on itself and the vhost stopped responding (#215).
+// on itself and the vhost stopped responding (#215). The cancel no longer
+// requeues (#299); basic.recover requeues the cancelled consumer's messages.
 func TestCancelConsumerWithMaxLengthAndDLX(t *testing.T) {
-	vh, _, q, dlq := newMaxLengthDLXSetup(t)
+	vh, connID, q, dlq := newMaxLengthDLXSetup(t)
 	if !finishesWithin(func() { _ = vh.CancelConsumer(1, "t") }, 2*time.Second) {
 		t.Fatal("CancelConsumer deadlocked")
+	}
+	if !finishesWithin(func() { _ = vh.HandleBasicRecover(connID, 1, true) }, 2*time.Second) {
+		t.Fatal("HandleBasicRecover deadlocked")
 	}
 	checkMaxLengthAfterRequeue(t, q, dlq)
 }

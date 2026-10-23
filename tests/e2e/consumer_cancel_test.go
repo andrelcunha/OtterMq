@@ -10,9 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConsumerCancel_RequeuesUnacked verifies that canceling a consumer
-// automatically requeues all unacked messages with redelivered=true
-func TestConsumerCancel_RequeuesUnacked(t *testing.T) {
+// TestConsumerCancel_UnackedRequeuedOnRecover verifies that canceling a
+// consumer keeps its unacked messages on the channel (#299), and that
+// basic.recover then requeues them with redelivered=true
+func TestConsumerCancel_UnackedRequeuedOnRecover(t *testing.T) {
 	tc := NewTestConnection(t, brokerURL)
 	defer tc.Close()
 
@@ -56,9 +57,11 @@ func TestConsumerCancel_RequeuesUnacked(t *testing.T) {
 		t.Logf("Received (not acked): %s", string(msg.Body))
 	}
 
-	// Cancel the consumer (should requeue the 3 unacked messages)
+	// Cancel the consumer: the 3 unacked messages stay unacked
 	err = tc.Ch.Cancel(consumerTag1, false)
 	require.NoError(t, err)
+	// ... until basic.recover requeues them
+	require.NoError(t, tc.Ch.Recover(true))
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -98,8 +101,9 @@ func TestConsumerCancel_RequeuesUnacked(t *testing.T) {
 	tc.ExpectNoMessage(msgs2, 500*time.Millisecond)
 }
 
-// TestConsumerCancel_OnlyRequeuesToOriginalQueue verifies that consumer cancel
-// only requeues messages to the queue they came from (isolation between queues)
+// TestConsumerCancel_OnlyRequeuesToOriginalQueue verifies that a cancelled
+// consumer's messages, nacked after the cancel, are requeued only to the
+// queue they came from (isolation between queues)
 func TestConsumerCancel_OnlyRequeuesToOriginalQueue(t *testing.T) {
 	tc := NewTestConnection(t, brokerURL)
 	defer tc.Close()
@@ -153,17 +157,28 @@ func TestConsumerCancel_OnlyRequeuesToOriginalQueue(t *testing.T) {
 	msgs2 := tc.StartConsumer(queue2.Name, consumerTag2, false)
 
 	// Receive messages from both queues but don't ack
+	var fromQ1 []amqp.Delivery
 	for i := 0; i < 2; i++ {
-		_, ok := tc.ConsumeWithTimeout(msgs1, 2*time.Second)
+		d, ok := tc.ConsumeWithTimeout(msgs1, 2*time.Second)
 		require.True(t, ok, "should receive from q1")
+		fromQ1 = append(fromQ1, d)
 
 		_, ok = tc.ConsumeWithTimeout(msgs2, 2*time.Second)
 		require.True(t, ok, "should receive from q2")
 	}
 
-	// Cancel only the first consumer
+	// Cancel only the first consumer; its deliveries stay unacked (#299)
+	// and are requeued by nacking them
 	err = tc.Ch.Cancel(consumerTag1, false)
 	require.NoError(t, err)
+	// Without a prefetch limit it was sent the rest too; its delivery
+	// channel closes on cancel-ok, after them.
+	for d := range msgs1 {
+		fromQ1 = append(fromQ1, d)
+	}
+	for _, d := range fromQ1 {
+		require.NoError(t, d.Nack(false, true))
+	}
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -327,6 +342,10 @@ func TestConsumerCancel_HighPrefetch(t *testing.T) {
 	// Cancel should be fast (< 100ms even with 500 unacked)
 	assert.Less(t, cancelDuration, 100*time.Millisecond, "cancel should be fast with new O(1) implementation")
 
+	// The unacked messages stay on the channel after the cancel (#299);
+	// basic.recover requeues them.
+	require.NoError(t, tc.Ch.Recover(true))
+
 	time.Sleep(200 * time.Millisecond)
 
 	// Start new consumer - should get all messages
@@ -411,17 +430,29 @@ func TestConsumerCancel_MultipleConsumersSameChannel(t *testing.T) {
 	msgs2 := tc.StartConsumer(queue2.Name, consumerTag2, false)
 
 	// Receive 3 messages from each but don't ack
+	var fromQ1, fromQ2 []amqp.Delivery
 	for i := 0; i < 3; i++ {
-		_, ok := tc.ConsumeWithTimeout(msgs1, 2*time.Second)
+		d, ok := tc.ConsumeWithTimeout(msgs1, 2*time.Second)
 		require.True(t, ok)
+		fromQ1 = append(fromQ1, d)
 
-		_, ok = tc.ConsumeWithTimeout(msgs2, 2*time.Second)
+		d, ok = tc.ConsumeWithTimeout(msgs2, 2*time.Second)
 		require.True(t, ok)
+		fromQ2 = append(fromQ2, d)
 	}
 
-	// Cancel only consumer-1
+	// Cancel only consumer-1. Its deliveries stay unacked (#299); nacking
+	// them requeues them.
 	err = tc.Ch.Cancel(consumerTag1, false)
 	require.NoError(t, err)
+	// Without a prefetch limit it was sent the rest too; its delivery
+	// channel closes on cancel-ok, after them.
+	for d := range msgs1 {
+		fromQ1 = append(fromQ1, d)
+	}
+	for _, d := range fromQ1 {
+		require.NoError(t, d.Nack(false, true))
+	}
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -431,6 +462,7 @@ func TestConsumerCancel_MultipleConsumersSameChannel(t *testing.T) {
 		require.True(t, ok, "consumer-2 should still work after consumer-1 is canceled")
 		msg.Ack(false)
 	}
+	tc.AckAll(fromQ2)
 
 	// Consumer-1's unacked messages should be requeued
 	consumerTag1New := tc.UniqueConsumerTag("consumer-1-new")
@@ -453,8 +485,8 @@ func TestConsumerCancel_MultipleConsumersSameChannel(t *testing.T) {
 	tc.ExpectNoMessage(msgs2, 500*time.Millisecond)
 }
 
-// TestConsumerCancel_WithRedeliveredFlag verifies that requeued messages
-// have the redelivered flag set correctly
+// TestConsumerCancel_WithRedeliveredFlag verifies that a cancelled
+// consumer's messages, once requeued, have the redelivered flag set
 func TestConsumerCancel_WithRedeliveredFlag(t *testing.T) {
 	tc := NewTestConnection(t, brokerURL)
 	defer tc.Close()
@@ -488,9 +520,11 @@ func TestConsumerCancel_WithRedeliveredFlag(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, msg1.Redelivered, "first delivery should have redelivered=false")
 
-	// Cancel consumer without acking
+	// Cancel consumer without acking, then requeue with basic.recover (the
+	// cancel itself keeps the delivery unacked, #299)
 	err = tc.Ch.Cancel(consumerTag1, false)
 	require.NoError(t, err)
+	require.NoError(t, tc.Ch.Recover(true))
 
 	time.Sleep(200 * time.Millisecond)
 
