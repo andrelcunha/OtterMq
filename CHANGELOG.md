@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Closing a channel, from the client or by the broker after a channel exception, left its
+  consumers running and its unacked messages assigned to it. The broker kept delivering to the
+  closed channel, and amqp091-go clients dropped the whole connection with 504 CHANNEL_ERROR.
+  Unacked `basic.get` deliveries were never requeued, even when the connection closed, so
+  non-persistent ones were lost. Closing a channel or a connection now cancels its consumers,
+  requeues all its unacked messages in delivery order, marked redelivered, and drops its prefetch,
+  flow and transaction state, so a reopened channel number starts clean (#219).
 - Unbinding a durable queue from a durable exchange was never saved, so the binding came back after
   a restart and the queue again received messages for the key it was unbound from. Bindings were
   also saved and recovered with their exchange's arguments instead of their own. They are now saved

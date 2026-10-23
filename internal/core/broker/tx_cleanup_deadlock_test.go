@@ -95,7 +95,8 @@ func startCommit(t *testing.T, ch *amqp091.Channel, queue *vhost.Queue) <-chan e
 
 // The path #311 names: the connection is torn down (management close,
 // heartbeat timeout) while its channel commits. cleanupConnection runs
-// vh.CleanupConnection, which doesn't touch the transaction state.
+// vh.CleanupConnection, which drops the transaction state without taking its
+// lock.
 func TestTxCommit_ConnectionCleanupDuringCommit(t *testing.T) {
 	b, ch, vh, connID, queue := txCommitFixture(t, 2000)
 
@@ -123,10 +124,9 @@ func TestTxCommit_ConnectionCleanupDuringCommit(t *testing.T) {
 	}
 }
 
-// CleanupChannel during a commit of the same channel. CleanupChannel has no
-// production caller yet (channel.close doesn't clean up the vhost, #219), but
-// it takes the transaction lock under vh.mu while the commit takes vh.mu
-// under the transaction lock.
+// CleanupChannel during a commit of the same channel. In production both
+// run on the connection's reader goroutine, but CleanupChannel takes the
+// transaction lock while the commit takes vh.mu under the transaction lock.
 func TestTxCommit_CleanupChannelDuringCommit(t *testing.T) {
 	_, ch, vh, connID, queue := txCommitFixture(t, 2000)
 	committed := startCommit(t, ch, queue)
