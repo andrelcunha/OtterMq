@@ -94,7 +94,7 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 			return
 		}
 
-		log.Trace().Interface("state", newState).Msg("New State")
+		log.Trace().Object("state", newState).Msg("New State")
 
 		if newState.MethodFrame != nil {
 			request := newState.MethodFrame
@@ -105,7 +105,7 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 			if newState.HeaderFrame != nil {
 				log.Trace().Interface("header", newState.HeaderFrame).Msg("HeaderFrame")
 			} else if newState.Body != nil {
-				log.Trace().Interface("body", newState.Body).Msg("Body")
+				log.Trace().Int("body_len", len(newState.Body)).Msg("Body")
 			}
 
 			// check if connection still exists

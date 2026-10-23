@@ -686,7 +686,7 @@ func (q *Queue) popUnlocked() *Message {
 	select {
 	case msg := <-q.messages:
 		q.count--
-		log.Debug().Str("queue", q.Name).Str("id", msg.ID).Str("body", string(msg.Body)).Msg("Popped message from queue")
+		log.Debug().Str("queue", q.Name).Str("id", msg.ID).Int("body_size", len(msg.Body)).Msg("Popped message from queue")
 		return &msg
 	default:
 		log.Debug().Str("queue", q.Name).Msg("Queue is empty")

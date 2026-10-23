@@ -42,7 +42,11 @@ func parseFrame(frame []byte) (any, error) {
 		return &Heartbeat{}, nil
 
 	default:
-		log.Trace().Bytes("frame", frame).Msg("Received unknown frame")
+		log.Trace().
+			Uint8("frame_type", frameType).
+			Uint16("channel", channel).
+			Int("frame_size", len(frame)).
+			Msg("Received unknown frame")
 		return nil, fmt.Errorf("unknown frame type: %d", frameType)
 	}
 }
