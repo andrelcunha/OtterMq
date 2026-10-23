@@ -64,3 +64,39 @@ func TestBindQueue_ExclusiveQueue(t *testing.T) {
 		t.Fatalf("owner's queue.unbind: %v", err)
 	}
 }
+
+// Regression test for #324: only the owner of an exclusive queue may consume
+// from it.
+func TestRegisterConsumer_ExclusiveQueue(t *testing.T) {
+	vh, owner := newExclusiveQueueVhost(t)
+
+	other := NewConsumer(newTestConsumerConnID(), 1, "excl", "other", &ConsumerProperties{})
+	_, err := vh.RegisterConsumer(other)
+	assertResourceLocked(t, err, uint16(amqp.BASIC), uint16(amqp.BASIC_CONSUME))
+
+	mine := NewConsumer(owner, 1, "excl", "mine", &ConsumerProperties{})
+	if _, err := vh.RegisterConsumer(mine); err != nil {
+		t.Fatalf("owner's basic.consume: %v", err)
+	}
+}
+
+// Regression test for #324: only the owner of an exclusive queue may declare
+// it again, passively or not.
+func TestCreateQueue_ExistingExclusiveQueue(t *testing.T) {
+	for _, passive := range []bool{false, true} {
+		vh, owner := newExclusiveQueueVhost(t)
+		props := func() *QueueProperties { return &QueueProperties{Passive: passive, Exclusive: true} }
+
+		_, err := vh.CreateQueue("excl", props(), newTestConsumerConnID())
+		assertResourceLocked(t, err, uint16(amqp.QUEUE), uint16(amqp.QUEUE_DECLARE))
+
+		// A non-owner is refused whatever properties it asks for, as in
+		// RabbitMQ: ownership is checked before equivalence.
+		_, err = vh.CreateQueue("excl", &QueueProperties{Passive: passive}, newTestConsumerConnID())
+		assertResourceLocked(t, err, uint16(amqp.QUEUE), uint16(amqp.QUEUE_DECLARE))
+
+		if _, err := vh.CreateQueue("excl", props(), owner); err != nil {
+			t.Fatalf("owner's queue.declare (passive=%v): %v", passive, err)
+		}
+	}
+}

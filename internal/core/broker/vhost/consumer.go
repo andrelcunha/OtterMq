@@ -80,7 +80,7 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 	}
 
 	// Check if queue exists
-	_, ok := vh.Queues[consumer.QueueName]
+	queue, ok := vh.Queues[consumer.QueueName]
 	if !ok {
 		vh.mu.Unlock()
 		return "", errors.NewChannelError(
@@ -89,6 +89,10 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 			uint16(amqp.BASIC),
 			uint16(amqp.BASIC_CONSUME),
 		)
+	}
+	if err := vh.validateQueueOwnership(queue, consumer.ConnectionID, uint16(amqp.BASIC), uint16(amqp.BASIC_CONSUME)); err != nil {
+		vh.mu.Unlock()
+		return "", err
 	}
 
 	var key ConsumerKey
@@ -176,7 +180,6 @@ func (vh *VHost) RegisterConsumer(consumer *Consumer) (string, error) {
 		consumer,
 	)
 	vh.collector.RecordConsumerAdded(consumer.QueueName)
-	queue := vh.Queues[consumer.QueueName]
 	queue.consumers.Store(int32(len(vh.ConsumersByQueue[consumer.QueueName])))
 	vh.mu.Unlock()
 

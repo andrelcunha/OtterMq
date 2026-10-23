@@ -424,6 +424,11 @@ func (vh *VHost) CreateQueue(name string, props *QueueProperties, connID Connect
 		// Queue already exists: validate compatibility
 		// Idempotent if properties match
 		if existing != nil {
+			// Only the owner of an exclusive queue may declare it again,
+			// whatever the properties (RabbitMQ checks this first too).
+			if err := vh.validateQueueOwnership(existing, connID, uint16(amqp.QUEUE), uint16(amqp.QUEUE_DECLARE)); err != nil {
+				return nil, err
+			}
 			if existing.Props == nil || props == nil {
 				return nil, fmt.Errorf("queue %s already exists with incompatible properties", name)
 			}

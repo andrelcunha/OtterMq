@@ -112,6 +112,11 @@ Status levels:
 - ✅ Backward compatible (queues without x-max-priority remain FIFO)
 - ✅ Integration with DLX, TTL, and QLL extensions
 
+**Exclusive Queues:**
+
+- ✅ An exclusive queue belongs to the connection that declared it and is deleted when that connection closes
+- ✅ Any other connection's `queue.declare` (passive or not), `queue.bind`, `queue.unbind`, `queue.purge`, `queue.delete`, `basic.consume` and `basic.get` on it closes that channel with `405 RESOURCE_LOCKED`, as in RabbitMQ
+
 ## basic
 
 | Method | Status | Notes |

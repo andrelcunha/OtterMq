@@ -144,9 +144,9 @@ func TestDeleteQueueSendsNoBasicCancelWithoutCapability(t *testing.T) {
 }
 
 // When a closing connection's exclusive queue is deleted, its own consumers
-// aren't notified (the connection is going away), but a consumer on another
-// connection is.
-func TestCleanupConnectionNotifiesOnlyOtherConnections(t *testing.T) {
+// aren't notified (the connection is going away). Another connection can't
+// consume from the queue (405 RESOURCE_LOCKED, #324), so nobody is notified.
+func TestCleanupConnectionDoesNotNotifyOwner(t *testing.T) {
 	owner, other := newTestConsumerConnID(), newTestConsumerConnID()
 	vh, sender := newCancelNotifyVHost(t, map[ConnectionID]bool{owner: true, other: true})
 
@@ -156,17 +156,15 @@ func TestCleanupConnectionNotifiesOnlyOtherConnections(t *testing.T) {
 		t.Fatalf("CreateQueue: %v", err)
 	}
 	registerNoAck(t, vh, owner, 1, "excl", "own")
-	registerNoAck(t, vh, other, 2, "excl", "foreign")
+	foreign := NewConsumer(other, 2, "excl", "foreign", &ConsumerProperties{NoAck: true})
+	if _, err := vh.RegisterConsumer(foreign); err == nil {
+		t.Fatal("another connection could consume from the exclusive queue")
+	}
 
 	vh.CleanupConnection(owner)
 
-	cancels, underLock := sender.sent()
-	want := sentCancel{other, 2, "foreign"}
-	if len(cancels) != 1 || cancels[0] != want {
-		t.Errorf("basic.cancel sent = %+v, want only %+v", cancels, want)
-	}
-	if underLock {
-		t.Error("basic.cancel was written while vh.mu was held")
+	if cancels, _ := sender.sent(); len(cancels) != 0 {
+		t.Errorf("basic.cancel sent = %+v, want none", cancels)
 	}
 	if queueExists(vh, "excl") {
 		t.Error("the exclusive queue was not deleted")
