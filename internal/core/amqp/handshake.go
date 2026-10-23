@@ -58,7 +58,8 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	if err != nil {
 		return nil, err
 	}
-	log.Trace().Msgf("Handshake - Received: %x\n", frame)
+	// The frame holds the PLAIN response, and so the password: never log it
+	log.Trace().Int("size", len(frame)).Msg("Handshake - Received connection.start-ok")
 	response, err := parseFrame(frame)
 	if err != nil {
 		return nil, err

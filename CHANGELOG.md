@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- With `LOG_LEVEL=debug`, every AMQP login wrote the client's username and password to the log
-  in plain text. The `connection.start-ok` response is no longer logged.
+- With `LOG_LEVEL=debug` or `trace`, every AMQP login wrote the client's username and password to
+  the log in plain text. Neither the `connection.start-ok` response nor its raw payload is logged
+  any more.
 - Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
   2.52.15 (GO-2026-4543, GO-2025-3845, GO-2025-3706), golang-jwt 5.3.1 (GO-2025-3553), plus
   fasthttp 1.76.0 and golang.org/x/crypto 0.58.0. `govulncheck ./...` now reports none (#207).
