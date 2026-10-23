@@ -518,8 +518,8 @@ func NewQueueProperties() *QueueProperties {
 
 // DeleteQueuebyName deletes a queue and removes its consumers. Each removed
 // consumer whose client advertised consumer_cancel_notify is sent
-// basic.cancel, after vh.mu is released and before this returns (so before
-// the caller's queue.delete-ok).
+// basic.cancel once vh.mu is released, without waiting for the write (see
+// consumerCancels.send).
 func (vh *VHost) DeleteQueuebyName(name string) error {
 	vh.mu.Lock()
 	removed, err := vh.deleteQueuebyNameUnlocked(name)

@@ -362,21 +362,33 @@ func (vh *VHost) consumerCancelsLocked(removed []*Consumer, skipConn ConnectionI
 
 // send writes basic.cancel to each consumer whose client advertised
 // consumer_cancel_notify. Others are not told, as the capability requires.
+// It doesn't wait for the writes: they go out on one goroutine per
+// connection, so a client that stopped reading can't hold up the queue
+// deletion or connection cleanup that removed its consumers, nor the
+// notification of the others. Frame writes have no deadline yet (#244).
 func (cc consumerCancels) send() {
 	if cc.sender == nil || cc.framer == nil {
 		return
 	}
+	byConn := make(map[ConnectionID][]*Consumer)
 	for _, c := range cc.consumers {
-		if !cc.sender.ConsumerCancelNotify(c.ConnectionID) {
-			continue
+		if cc.sender.ConsumerCancelNotify(c.ConnectionID) {
+			byConn[c.ConnectionID] = append(byConn[c.ConnectionID], c)
 		}
-		frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
-		if err := cc.sender.SendFrame(c.ConnectionID, c.Channel, frame); err != nil {
-			log.Debug().Err(err).
-				Str("consumer", c.Tag).
-				Uint16("channel", c.Channel).
-				Msg("Failed to send basic.cancel for a removed consumer")
-		}
+	}
+	for connID, consumers := range byConn {
+		go func() {
+			for _, c := range consumers {
+				frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
+				if err := cc.sender.SendFrame(connID, c.Channel, frame); err != nil {
+					log.Debug().Err(err).
+						Str("consumer", c.Tag).
+						Uint16("channel", c.Channel).
+						Msg("Failed to send basic.cancel for a removed consumer")
+					return
+				}
+			}
+		}()
 	}
 }
 
