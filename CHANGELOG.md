@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
+  2.52.15 (GO-2026-4543, GO-2025-3845, GO-2025-3706), golang-jwt 5.3.1 (GO-2025-3553), plus
+  fasthttp 1.76.0 and golang.org/x/crypto 0.58.0. `govulncheck ./...` now reports none (#207).
+
+### Changed
+
+- Building OtterMQ now needs Go 1.26 or later (required by the upgraded dependencies). `go.mod`
+  pins the toolchain to Go 1.27.3, which CI uses, and the Docker image builds with
+  `golang:1.27-alpine` instead of an unpinned `golang:alpine` (#207).
+
 ### Fixed
 
 - Getting messages through the management API now sizes its result by the number of messages in
@@ -16,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request.
 - A panic in a web API handler now fails only that request with a 500 and is logged with its
   stack trace. Before, it ended the whole process, taking the AMQP broker down with the web API.
+  The Prometheus metrics server recovers the same way (#207).
 
 ## [v0.21.1]
 

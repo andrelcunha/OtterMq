@@ -1,5 +1,5 @@
 # Stage 1: Build Stage
-FROM golang:alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 
 # Install build tools
 RUN apk add --no-cache make git gcc g++
