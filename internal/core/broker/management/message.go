@@ -64,10 +64,10 @@ func (s *Service) GetMessages(vhostName, queue string, count int, ackMode models
 		return nil, err
 	}
 	log.Debug().Str("queue", queue).Int("requested_count", count).Int("available_count", msgCount).Msg("Getting messages from queue")
-	msgs := make([]models.MessageDTO, 0, count)
 	if count > msgCount {
 		count = msgCount
 	}
+	msgs := make([]models.MessageDTO, 0, count)
 
 	channelKey := vhost.ConnectionChannelKey{
 		ConnectionID: vhost.MANAGEMENT_CONNECTION_ID,

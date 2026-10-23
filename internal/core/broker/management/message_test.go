@@ -1,6 +1,8 @@
 package management
 
 import (
+	"math"
+	"runtime"
 	"testing"
 	"time"
 
@@ -156,6 +158,42 @@ func TestGetMessages_WithAck(t *testing.T) {
 	state := vh.ChannelDeliveries[key]
 	require.NotNil(t, state)
 	assert.Empty(t, state.UnackedByTag)
+}
+
+// A requested count above the queue depth returns what the queue holds, and
+// the result is sized by the queue depth, not by the request.
+func TestGetMessages_CountAboveQueueDepth(t *testing.T) {
+	for _, count := range []int{100_000, math.MaxInt} {
+		broker := setupTestBroker(t)
+		service := NewService(broker)
+
+		vh := broker.GetVHost("/")
+		_, err := vh.CreateQueue("test-queue", &vhost.QueueProperties{}, vhost.MANAGEMENT_CONNECTION_ID)
+		require.NoError(t, err)
+		err = vh.BindQueue("", "test-queue", "test-queue", nil, vhost.MANAGEMENT_CONNECTION_ID)
+		require.NoError(t, err)
+		for i := 0; i < 2; i++ {
+			msg := vhost.NewMessage(amqp.Message{Body: []byte("message")}, vhost.GenerateMessageId())
+			_, err := vh.Publish("", "test-queue", &msg)
+			require.NoError(t, err)
+		}
+
+		var msgs []models.MessageDTO
+		var panicked any
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		func() {
+			defer func() { panicked = recover() }()
+			msgs, err = service.GetMessages("/", "test-queue", count, models.NoAck)
+		}()
+		runtime.ReadMemStats(&after)
+
+		require.Nil(t, panicked, "count %d", count)
+		require.NoError(t, err)
+		assert.Len(t, msgs, 2, "count %d", count)
+		assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20), "bytes allocated for count %d", count)
+	}
 }
 
 func TestGetMessages_EmptyQueue(t *testing.T) {
