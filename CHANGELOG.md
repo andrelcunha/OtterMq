@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AMQP login rejected passwords and usernames containing spaces, and clients that send a PLAIN
+  authorization identity equal to the username: the PLAIN response was split on spaces instead of
+  on its NUL separators. It is now parsed as RFC 4616 `authzid NUL authcid NUL passwd`; an
+  authorization identity other than the username is still refused (#326).
 - Cleaning up a channel's vhost state while that channel ran `tx.commit` deadlocked the vhost, as
   the two took the vhost lock and the transaction lock in opposite orders. No released code path
   cleans up a single channel yet, so this is a latent fix ahead of the channel-close cleanup in #219

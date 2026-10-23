@@ -391,7 +391,8 @@ func parseConnectionStartOkFrame(payload []byte) (*ConnectionStartOk, error) {
 		return nil, fmt.Errorf("unsupported mechanism: %s", mechanism)
 	}
 
-	security, err := DecodeSecurityPlain(buf)
+	// The PLAIN response is kept as raw bytes: its NULs separate the fields.
+	security, err := DecodeLongStr(buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode security: %v", err)
 	}

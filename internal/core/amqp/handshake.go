@@ -244,20 +244,39 @@ func isLoopbackAddr(addr net.Addr) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// parsePlainResponse splits a SASL PLAIN response (RFC 4616) into its
+// username and password. The response is authzid NUL authcid NUL passwd;
+// authzid must be empty or equal to authcid, since authorizing as another
+// identity is not supported. The error never includes the response.
+func parsePlainResponse(response string) (username, password string, err error) {
+	fields := strings.Split(response, "\x00")
+	if len(fields) != 3 {
+		return "", "", errors.New("invalid PLAIN response: want authzid, username and password separated by NUL")
+	}
+	authzid, authcid, passwd := fields[0], fields[1], fields[2]
+	if authcid == "" {
+		return "", "", errors.New("invalid PLAIN response: empty username")
+	}
+	if passwd == "" {
+		return "", "", errors.New("invalid PLAIN response: empty password")
+	}
+	if authzid != "" && authzid != authcid {
+		return "", "", errors.New("invalid PLAIN response: authorization identity differs from the username")
+	}
+	return authcid, passwd, nil
+}
+
 func processStartOkContent(startOkFrame *ConnectionStartOk) (string, error) {
 	mechanism := startOkFrame.Mechanism
 	if mechanism != "PLAIN" {
 		return "", fmt.Errorf("mechanism invalid or %s not suported", mechanism)
 	}
-	// parse username and password from startOkFrame.Response, which must
-	// never be logged: it holds the password
-	credentials := strings.Split(strings.Trim(startOkFrame.Response, " "), " ")
-	log.Debug().Str("username", credentials[0]).Msg("Credentials parsed")
-	if len(credentials) != 2 {
-		return "", fmt.Errorf("failed to parse credentials: invalid format")
+	// startOkFrame.Response holds the password: it must never be logged
+	username, password, err := parsePlainResponse(startOkFrame.Response)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse credentials: %w", err)
 	}
-	username := credentials[0]
-	password := credentials[1]
+	log.Debug().Str("username", username).Msg("Credentials parsed")
 	// ask for persistdb if user and password match
 	authOk, err := persistdb.AuthenticateUser(username, password)
 	if err != nil {

@@ -25,7 +25,7 @@ func TestProcessStartOkContent_DoesNotLogPassword(t *testing.T) {
 
 	// alice's password is "pw", so authentication fails; the response has
 	// been parsed (and was logged) by then.
-	_, _ = processStartOkContent(&ConnectionStartOk{Mechanism: "PLAIN", Response: " alice " + password})
+	_, _ = processStartOkContent(&ConnectionStartOk{Mechanism: "PLAIN", Response: "\x00alice\x00" + password})
 
 	if !strings.Contains(buf.String(), "alice") {
 		t.Fatalf("expected the handshake to log at debug level, got %q", buf.String())
