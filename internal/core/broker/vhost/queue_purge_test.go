@@ -84,7 +84,7 @@ func TestPurgeQueue_QueueNotFoundReturnsAMQPError(t *testing.T) {
 	}
 }
 
-func TestPurgeQueue_ExclusiveQueueWrongConnectionReturnsAccessRefused(t *testing.T) {
+func TestPurgeQueue_ExclusiveQueueWrongConnectionReturnsResourceLocked(t *testing.T) {
 	var options = VHostOptions{
 		QueueBufferSize: 100,
 		Persistence:     &dummy.DummyPersistence{},
@@ -111,8 +111,8 @@ func TestPurgeQueue_ExclusiveQueueWrongConnectionReturnsAccessRefused(t *testing
 	if !ok {
 		t.Fatalf("expected AMQPError, got %T (%v)", err, err)
 	}
-	if amqpErr.ReplyCode() != uint16(amqp.ACCESS_REFUSED) {
-		t.Errorf("expected ACCESS_REFUSED, got %d", amqpErr.ReplyCode())
+	if amqpErr.ReplyCode() != uint16(amqp.RESOURCE_LOCKED) {
+		t.Errorf("expected RESOURCE_LOCKED, got %d", amqpErr.ReplyCode())
 	}
 	if amqpErr.ClassID() != uint16(amqp.QUEUE) {
 		t.Errorf("expected class QUEUE, got %d", amqpErr.ClassID())

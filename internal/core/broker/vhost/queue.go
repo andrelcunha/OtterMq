@@ -734,13 +734,8 @@ func (vh *VHost) PurgeQueue(name string, connID ConnectionID) (uint32, error) {
 		return 0, errors.NewChannelError(text, uint16(amqp.NOT_FOUND), uint16(amqp.QUEUE), uint16(amqp.QUEUE_PURGE))
 	}
 
-	// Validate ownership for exclusive queues
-	if queue.Props.Exclusive && queue.OwnerConn != connID {
-		return 0, errors.NewChannelError(
-			fmt.Sprintf("queue '%s' is exclusive to another connection", name),
-			uint16(amqp.ACCESS_REFUSED),
-			uint16(amqp.QUEUE),
-			uint16(amqp.QUEUE_PURGE))
+	if err := vh.validateQueueOwnership(queue, connID, uint16(amqp.QUEUE), uint16(amqp.QUEUE_PURGE)); err != nil {
+		return 0, err
 	}
 	purged := queue.StreamPurge(func(msg *Message) {
 		if msg != nil {

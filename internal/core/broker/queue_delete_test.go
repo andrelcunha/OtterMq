@@ -220,7 +220,7 @@ func TestQueueDeleteHandler_SuccessDeletesQueueAndSendsOk(t *testing.T) {
 	}
 }
 
-func TestQueueDeleteHandler_ExclusiveOwnerMismatch_AccessRefused(t *testing.T) {
+func TestQueueDeleteHandler_ExclusiveOwnerMismatch_ResourceLocked(t *testing.T) {
 	b := &Broker{framer: &amqp.DefaultFramer{}, connInfos: make(map[net.Conn]*amqp.ConnectionInfo)}
 	var options = vhost.VHostOptions{
 		QueueBufferSize: 100,
@@ -272,7 +272,7 @@ func TestQueueDeleteHandler_ExclusiveOwnerMismatch_AccessRefused(t *testing.T) {
 		t.Fatalf("queueDeleteHandler returned error: %v", err)
 	}
 
-	// Channel should be closing due to ACCESS_REFUSED
+	// Channel should be closing due to RESOURCE_LOCKED
 	b.mu.Lock()
 	if !b.connInfos[foreign].Channels[1].ClosingChannel {
 		b.mu.Unlock()
