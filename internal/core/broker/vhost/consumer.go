@@ -381,17 +381,20 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 		delete(vh.ChannelDeliveries, channelKey)
 	}
 
-	// Clean up transaction state (already holding vh.mu, so access map directly)
-	if txState, exists := vh.ChannelTransactions[channelKey]; exists {
+	// The transaction state is reset after vh.mu is released: a commit holds
+	// the transaction lock while it publishes, which takes vh.mu.
+	txState := vh.ChannelTransactions[channelKey]
+	delete(vh.ChannelTransactions, channelKey)
+	vh.mu.Unlock()
+
+	if txState != nil {
 		txState.Lock()
 		// Discard buffered publishes and acks (implicit rollback)
 		txState.BufferedPublishes = []BufferedPublish{}
 		txState.BufferedAcks = []BufferedAck{}
 		txState.InTransaction = false
 		txState.Unlock()
-		delete(vh.ChannelTransactions, channelKey)
 	}
-	vh.mu.Unlock()
 
 	vh.requeue(work)
 }

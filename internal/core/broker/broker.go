@@ -33,12 +33,13 @@ const (
 )
 
 // Locks: mu guards vhosts, connInfos and every ConnectionInfo's Channels
-// map. connectionsMu guards connections and connToID. Lock order: mu, then a
-// vhost's locks (vh.mu, then a channel's delivery state), then connectionsMu,
-// which is always taken last. A transaction commit holds its transaction's
-// lock while it takes mu, so never take a transaction's lock under mu. Go
-// through the accessors in conn_state.go rather than indexing the maps
-// directly.
+// map. connectionsMu guards connections and connToID. Lock order: a
+// channel's transaction lock (vhost.ChannelTransactionState), then mu, then
+// a vhost's locks (vh.mu, then a channel's delivery state), then
+// connectionsMu, which is always taken last. A transaction commit holds its
+// transaction's lock while it takes mu and vh.mu, so never take a
+// transaction's lock under either. Go through the accessors in conn_state.go
+// rather than indexing the maps directly.
 type Broker struct {
 	vhosts       map[string]*vhost.VHost
 	config       *config.Config                    `json:"-"`
