@@ -71,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write deadline per client, and a client that doesn't take its frame in time is disconnected (#313).
 - Deleting a queue that still had consumers left them registered under the queue's name, so a queue
   declared again with that name counted them and delivered its messages to them instead of to its
-  own consumers. The consumers of a deleted queue are now removed with it, and `basic.cancel` for a
+  own consumers. The consumers of a deleted queue are now removed with it; their unacked messages can
+  still be acked, but are no longer requeued into a queue that takes the name. `basic.cancel` for a
   consumer tag the broker doesn't know (such as one of those) gets `cancel-ok`, as in RabbitMQ,
   instead of closing the channel with 404 (#312).
 - A crash during the first start, or two brokers starting at once on a fresh data dir, could
