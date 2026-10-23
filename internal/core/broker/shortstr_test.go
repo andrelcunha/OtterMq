@@ -2,6 +2,7 @@ package broker
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -42,13 +43,23 @@ func TestBasicReturnEncodingErrorWritesNoFrames(t *testing.T) {
 	}
 }
 
+type failingChannelCloseFramer struct {
+	amqp.DefaultFramer
+	err error
+}
+
+func (f *failingChannelCloseFramer) CreateChannelCloseFrame(_, _, _, _ uint16, _ string) ([]byte, error) {
+	return nil, f.err
+}
+
 func TestChannelErrorResponsePropagatesEncodingError(t *testing.T) {
 	b, _, conn := createTestBroker()
-	b.framer = &amqp.DefaultFramer{}
+	wantErr := errors.New("synthetic close frame encoding failure")
+	b.framer = &failingChannelCloseFramer{err: wantErr}
 	request := &amqp.RequestMethodMessage{Channel: 1, ClassID: uint16(amqp.QUEUE), MethodID: uint16(amqp.QUEUE_DECLARE)}
 	cause := amqperrors.NewChannelError(strings.Repeat("x", 256), uint16(amqp.NOT_FOUND), request.ClassID, request.MethodID)
 	_, err := sendChannelErrorResponse(cause, b, conn, request)
-	if err == nil || !strings.Contains(err.Error(), "255 bytes") {
-		t.Fatalf("expected propagated shortstr length error, got %v", err)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected propagated frame encoding error %v, got %v", wantErr, err)
 	}
 }

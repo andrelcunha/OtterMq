@@ -80,7 +80,7 @@ func createChannelCloseFrame(channel, replyCode, classID, methodID uint16, reply
 	}
 	replyTextKv := KeyValue{
 		Key:   STRING_SHORT,
-		Value: replyText,
+		Value: truncateCloseReplyText(replyText),
 	}
 	classIDKv := KeyValue{
 		Key:   INT_SHORT,
