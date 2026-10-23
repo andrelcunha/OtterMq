@@ -327,6 +327,11 @@ func (b *Broker) sendChannelClosing(conn net.Conn, channel, replyCode, classId, 
 	}
 	chState.ClosingChannel = true
 	b.mu.Unlock()
+	// The channel is gone for the client once it reads channel.close, so its
+	// consumers stop and its unacked messages are requeued first, as in
+	// RabbitMQ. Methods the client sends before its close-ok are ignored;
+	// the transaction state is dropped when close-ok arrives.
+	b.releaseChannelDeliveries(conn, channel)
 	frame := b.framer.CreateChannelCloseFrame(channel, replyCode, classId, methodId, replyText)
 	return b.framer.SendFrame(conn, frame)
 }

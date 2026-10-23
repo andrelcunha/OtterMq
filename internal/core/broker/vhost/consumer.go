@@ -3,6 +3,7 @@ package vhost
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -290,7 +291,7 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 	// Remove from ConsumersByQueue
 	consumersForQueue := vh.ConsumersByQueue[consumer.QueueName]
 	for i, c := range consumersForQueue {
-		if c.Tag == key.Tag && c.Channel == key.Channel {
+		if c == consumer {
 			vh.ConsumersByQueue[consumer.QueueName] = append(consumersForQueue[:i], consumersForQueue[i+1:]...)
 			vh.collector.RecordConsumerRemoved(consumer.QueueName)
 			break
@@ -312,7 +313,7 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 	// Remove from ConsumersByChannel (connection-scoped)
 	consumersForChannel := vh.ConsumersByChannel[channelKey]
 	for i, c := range consumersForChannel {
-		if c.Tag == key.Tag {
+		if c == consumer {
 			vh.ConsumersByChannel[channelKey] = append(consumersForChannel[:i], consumersForChannel[i+1:]...)
 			break
 		}
@@ -492,38 +493,20 @@ func (vh *VHost) checkAutoDeleteQueueUnlocked(name string) (bool, error) {
 	return true, nil
 }
 
-// CleanupChannel cancels a closed channel's consumers and requeues every
-// message still unacked on it. The requeue happens after vh.mu is released.
+// CleanupChannel cancels a closed channel's consumers, requeues every
+// message still unacked on it (as redelivered, in delivery-tag order) and
+// drops its delivery and transaction state, so the channel number starts
+// clean if it is opened again. Call it before telling the client the channel
+// is closed: once it returns, nothing more is delivered on the channel. The
+// requeue happens after vh.mu is released. It takes the channel's
+// transaction lock, so it must not be called with it held.
 func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
-	vh.mu.Lock()
-	channelKey := ConnectionChannelKey{connID, channel}
-	work := vh.cancelChannelConsumersLocked(channelKey)
-
-	if state := vh.ChannelDeliveries[channelKey]; state != nil {
-		// What is left are deliveries without a consumer (basic.get).
-		state.mu.Lock()
-		unackedMessages := fetchUnackedMessages(state)
-		state.mu.Unlock()
-
-		byQueue := make(map[string]int) // queue name -> index in work
-		for _, record := range unackedMessages {
-			queue, exists := vh.Queues[record.QueueName]
-			if !exists {
-				continue
-			}
-			i, seen := byQueue[record.QueueName]
-			if !seen {
-				i = len(work)
-				byQueue[record.QueueName] = i
-				work = append(work, requeueWork{queue: queue})
-			}
-			work[i].records = append(work[i].records, record)
-		}
-		delete(vh.ChannelDeliveries, channelKey)
-	}
+	vh.ReleaseChannelDeliveries(connID, channel)
 
 	// The transaction state is reset after vh.mu is released: a commit holds
 	// the transaction lock while it publishes, which takes vh.mu.
+	channelKey := ConnectionChannelKey{connID, channel}
+	vh.mu.Lock()
 	txState := vh.ChannelTransactions[channelKey]
 	delete(vh.ChannelTransactions, channelKey)
 	vh.mu.Unlock()
@@ -536,8 +519,91 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 		txState.InTransaction = false
 		txState.Unlock()
 	}
+}
 
-	vh.requeue(work)
+// ReleaseChannelDeliveries is the part of CleanupChannel that doesn't touch
+// the transaction state: it cancels the channel's consumers, requeues its
+// unacked messages and drops its delivery state. The broker runs it when it
+// sends channel.close, which can happen while a tx.commit holds the
+// transaction lock, and runs CleanupChannel once the client's close-ok
+// arrives.
+func (vh *VHost) ReleaseChannelDeliveries(connID ConnectionID, channel uint16) {
+	channelKey := ConnectionChannelKey{connID, channel}
+	vh.mu.Lock()
+	cancelled, work := vh.cancelChannelConsumersLocked(channelKey)
+	vh.mu.Unlock()
+
+	// A delivery that passed its Active check before the cancel holds the
+	// consumer's sendMu until its frames are written; wait for it, so that
+	// it can't follow channel.close or close-ok on the wire.
+	for _, c := range cancelled {
+		c.sendMu.Lock()
+		c.sendMu.Unlock() //nolint:staticcheck // empty critical section: a barrier
+	}
+
+	// The delivery state is taken only now: such a delivery may have
+	// recreated it, after the cancel, before seeing the consumer inactive.
+	vh.mu.Lock()
+	work = append(work, vh.takeChannelDeliveriesLocked(channelKey)...)
+	vh.mu.Unlock()
+
+	vh.requeue(inDeliveryOrder(work))
+}
+
+// takeChannelDeliveriesLocked deletes a channel's delivery state and returns
+// the work to requeue what is still unacked on it. Deliveries of deleted
+// queues are left out. The caller holds vh.mu.
+func (vh *VHost) takeChannelDeliveriesLocked(channelKey ConnectionChannelKey) []requeueWork {
+	state := vh.ChannelDeliveries[channelKey]
+	if state == nil {
+		return nil
+	}
+	delete(vh.ChannelDeliveries, channelKey)
+	state.mu.Lock()
+	records := fetchUnackedMessages(state)
+	state.mu.Unlock()
+
+	var work []requeueWork
+	byQueue := make(map[string]int) // queue name -> index in work
+	for _, record := range records {
+		queue, exists := vh.Queues[record.QueueName]
+		if !exists {
+			continue
+		}
+		i, seen := byQueue[record.QueueName]
+		if !seen {
+			i = len(work)
+			byQueue[record.QueueName] = i
+			work = append(work, requeueWork{queue: queue, redelivered: true})
+		}
+		work[i].records = append(work[i].records, record)
+	}
+	return work
+}
+
+// inDeliveryOrder merges the work for each queue and sorts its records by
+// delivery tag, so a closed channel's messages go back in the order they
+// were delivered. All the work must come from one channel, whose tags are
+// comparable.
+func inDeliveryOrder(work []requeueWork) []requeueWork {
+	var merged []requeueWork
+	byQueue := make(map[*Queue]int)
+	for _, w := range work {
+		i, seen := byQueue[w.queue]
+		if !seen {
+			i = len(merged)
+			byQueue[w.queue] = i
+			merged = append(merged, requeueWork{queue: w.queue, redelivered: w.redelivered})
+		}
+		merged[i].redelivered = merged[i].redelivered || w.redelivered
+		merged[i].records = append(merged[i].records, w.records...)
+	}
+	for _, w := range merged {
+		sort.Slice(w.records, func(a, b int) bool {
+			return w.records[a].DeliveryTag < w.records[b].DeliveryTag
+		})
+	}
+	return merged
 }
 
 // fetchUnackedMessages returns the channel's unacked deliveries from
@@ -561,33 +627,79 @@ func fetchUnackedMessages(state *ChannelDeliveryState) []*DeliveryRecord {
 	return records
 }
 
-// cancelChannelConsumersLocked cancels every consumer on a channel. The
-// caller holds vh.mu and must pass the returned work to requeue after
-// releasing it.
-func (vh *VHost) cancelChannelConsumersLocked(channelKey ConnectionChannelKey) []requeueWork {
+// cancelChannelConsumersLocked cancels every consumer on a channel and
+// returns them. It only cancels a consumer still registered under its key:
+// keys are not connection-scoped (#220), so another connection's consumer
+// may hold the same channel number and tag. The caller holds vh.mu and must
+// pass the returned work to requeue after releasing it.
+func (vh *VHost) cancelChannelConsumersLocked(channelKey ConnectionChannelKey) ([]*Consumer, []requeueWork) {
 	consumersForChannel := vh.ConsumersByChannel[channelKey]
 	consumersCopy := make([]*Consumer, len(consumersForChannel))
 	copy(consumersCopy, consumersForChannel)
 
+	var cancelled []*Consumer
 	var work []requeueWork
 	for _, c := range consumersCopy {
 		key := ConsumerKey{c.Channel, c.Tag}
-		if vh.Consumers[key] != c {
-			continue // already cancelled
+		if c.ConnectionID != channelKey.ConnectionID || vh.Consumers[key] != c {
+			continue // already cancelled, or not this connection's
 		}
 		work = append(work, vh.cancelConsumerLocked(key, c)...)
+		cancelled = append(cancelled, c)
 	}
 	delete(vh.ConsumersByChannel, channelKey)
-	return work
+	return cancelled, work
 }
 
-// CleanupConnection cancels a closed connection's consumers and deletes its
-// exclusive queues. Unacked messages are requeued after vh.mu is released.
+// connectionChannelsLocked returns every channel of connID that has
+// consumers, delivery state or transaction state in the vhost. The caller
+// holds vh.mu.
+func (vh *VHost) connectionChannelsLocked(connID ConnectionID) []ConnectionChannelKey {
+	seen := make(map[ConnectionChannelKey]struct{})
+	var keys []ConnectionChannelKey
+	add := func(key ConnectionChannelKey) {
+		if key.ConnectionID != connID {
+			return
+		}
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	for key := range vh.ConsumersByChannel {
+		add(key)
+	}
+	for _, c := range vh.Consumers {
+		add(ConnectionChannelKey{c.ConnectionID, c.Channel})
+	}
+	for key := range vh.ChannelDeliveries {
+		add(key)
+	}
+	for key := range vh.ChannelTransactions {
+		add(key)
+	}
+	return keys
+}
+
+// CleanupConnection cleans up every channel of a closed connection like
+// CleanupChannel does, then deletes its exclusive queues. Unacked messages
+// are requeued after vh.mu is released.
 func (vh *VHost) CleanupConnection(connID ConnectionID) {
 	vh.mu.Lock()
 
-	// Cancel each consumer of this connection
+	// Each channel's work is ordered on its own: tags are per channel. The
+	// socket is already closed, so there is no in-flight delivery to wait
+	// for as CleanupChannel does.
 	var work []requeueWork
+	for _, channelKey := range vh.connectionChannelsLocked(connID) {
+		_, channelWork := vh.cancelChannelConsumersLocked(channelKey)
+		channelWork = append(channelWork, vh.takeChannelDeliveriesLocked(channelKey)...)
+		work = append(work, inDeliveryOrder(channelWork)...)
+		// Nothing can reach a dropped transaction state: the connection is
+		// gone. It isn't reset here, since a commit may still hold its lock.
+		delete(vh.ChannelTransactions, channelKey)
+	}
+	// A consumer missing from ConsumersByChannel would have no channel above.
 	for key, consumer := range vh.Consumers {
 		if consumer.ConnectionID == connID {
 			work = append(work, vh.cancelConsumerLocked(key, consumer)...)
@@ -616,11 +728,18 @@ func (vh *VHost) CleanupConnection(connID ConnectionID) {
 			log.Error().Str("queue", queueName).Msg("Error deleting exclusive queue")
 		}
 	}
+	// Don't requeue into a queue deleted above.
+	live := work[:0]
+	for _, w := range work {
+		if vh.Queues[w.queue.Name] == w.queue {
+			live = append(live, w)
+		}
+	}
 	cancels := vh.consumerCancelsLocked(removed, connID)
 	vh.mu.Unlock()
 
 	cancels.send()
-	vh.requeue(work)
+	vh.requeue(live)
 }
 
 func (vh *VHost) GetActiveConsumersForQueue(queueName string) []*Consumer {

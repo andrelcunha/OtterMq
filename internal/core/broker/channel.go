@@ -185,6 +185,10 @@ func (b *Broker) handleChannelClose(request *amqp.RequestMethodMessage, conn net
 		log.Debug().Uint16("channel", request.Channel).Msg("Channel already closed") // no need to rise an error here
 		return nil, nil
 	}
+	// Cleaned up before close-ok: the client drops the channel when it
+	// reads close-ok, and treats a delivery on it after that as a
+	// connection error.
+	b.cleanupChannel(conn, request.Channel)
 	// send channel close ok
 	frame := b.framer.CreateChannelCloseOkFrame(request.Channel)
 	err := b.framer.SendFrame(conn, frame)
@@ -198,10 +202,46 @@ func (b *Broker) handleChannelClose(request *amqp.RequestMethodMessage, conn net
 }
 
 func (b *Broker) handleChannelCloseOk(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
-	// Server-initiated channel close: we sent channel.close and now client is acknowledging with channel.close-ok
+	// Server-initiated channel close: we sent channel.close and now client is acknowledging with channel.close-ok.
+	// sendChannelClosing already released the deliveries; this drops the
+	// transaction state, and anything left since (the methods in between
+	// are ignored, so normally nothing).
+	b.cleanupChannel(conn, request.Channel)
 	b.removeChannel(conn, request.Channel)
 	log.Debug().Uint16("channel", request.Channel).Msg("Channel closed (server-initiated)")
 	return nil, nil
+}
+
+// cleanupChannel cancels the channel's consumers, requeues its unacked
+// messages and drops its delivery and transaction state in the vhost
+// (vh.CleanupChannel). It must be called without b.mu, vh.mu or the
+// channel's transaction lock held.
+func (b *Broker) cleanupChannel(conn net.Conn, channel uint16) {
+	if vh, connID, ok := b.channelVHost(conn); ok {
+		vh.CleanupChannel(connID, channel)
+	}
+}
+
+// releaseChannelDeliveries is cleanupChannel without the transaction state
+// (vh.ReleaseChannelDeliveries), for sendChannelClosing: a tx.commit that
+// fails sends channel.close with the transaction lock held.
+func (b *Broker) releaseChannelDeliveries(conn net.Conn, channel uint16) {
+	if vh, connID, ok := b.channelVHost(conn); ok {
+		vh.ReleaseChannelDeliveries(connID, channel)
+	}
+}
+
+func (b *Broker) channelVHost(conn net.Conn) (*vhost.VHost, vhost.ConnectionID, bool) {
+	connInfo, ok := b.getConnInfo(conn)
+	if !ok {
+		return nil, "", false
+	}
+	connID, ok := b.GetConnectionID(conn)
+	if !ok {
+		return nil, "", false
+	}
+	vh := b.GetVHost(connInfo.VHostName)
+	return vh, connID, vh != nil
 }
 
 // registerChannel register a new channel to the connection
