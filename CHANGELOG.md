@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Building OtterMQ now needs Go 1.26 or later (required by the upgraded dependencies). `go.mod`
   pins the toolchain to Go 1.27.3, which CI uses, and the Docker image builds with
   `golang:1.27-alpine` instead of an unpinned `golang:alpine` (#207).
+- CI now fails when a Go file isn't `gofmt`-formatted, and the whole tree has been formatted once
+  (#329).
 
 ### Removed
 

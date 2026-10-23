@@ -1,0 +1,6 @@
+# Commits that git blame should skip. To use it locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub's blame view reads this file automatically.
+
+# style: gofmt the tree (#329)
+d498ad75e4afc5444dbaaa1557f4de9198e25f3c
