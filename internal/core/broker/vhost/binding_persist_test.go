@@ -1,6 +1,7 @@
 package vhost
 
 import (
+	"math"
 	"testing"
 
 	"github.com/ottermq/ottermq/pkg/metrics"
@@ -132,5 +133,17 @@ func TestUnbindQueue_RemovesBindingSavedWithNullArguments(t *testing.T) {
 	}
 	if got := bindingsTo(recover(), "ex", "q", "k"); len(got) != 0 {
 		t.Fatalf("binding came back after recovery with args %v", got[0].Args)
+	}
+}
+
+// Arguments JSON can't encode, such as an infinite float, still match
+// themselves, so such a binding can be unbound and isn't bound twice.
+func TestBindingArgumentsMatch_NonJSONValues(t *testing.T) {
+	args := map[string]any{"f": math.Inf(1)}
+	if !bindingArgumentsMatch(args, map[string]any{"f": math.Inf(1)}) {
+		t.Fatal("arguments holding +Inf don't match themselves")
+	}
+	if bindingArgumentsMatch(args, map[string]any{"f": math.Inf(-1)}) {
+		t.Fatal("+Inf matches -Inf")
 	}
 }

@@ -2,6 +2,7 @@ package vhost
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -217,8 +218,11 @@ func bindingArgumentsMatch(a, b map[string]interface{}) bool {
 	if len(a) != len(b) {
 		return false
 	}
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
 	// Recovered bindings carry their arguments through a JSON round-trip
-	// (an int32 comes back as float64), so compare them as JSON.
+	// (an int32 comes back as float64), so compare them as JSON too.
 	return equalArgs(a, b)
 }
 
