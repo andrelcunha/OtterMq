@@ -771,7 +771,7 @@ func parseBasicRecoverAsyncFrame(payload []byte) (*RequestMethodMessage, error) 
 func parseBasicRecoverFrame(payload []byte) (*RequestMethodMessage, error) {
 	// Expected fields:
 	// 1 requeue (bit - packed as octet)
-	if len(payload) < 9 {
+	if len(payload) < 1 {
 		return nil, fmt.Errorf("payload too short: payload length %d", len(payload))
 	}
 	buf := bytes.NewReader(payload)
