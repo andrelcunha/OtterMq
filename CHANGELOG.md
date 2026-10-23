@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A refused `basic.consume` (no such queue, a duplicate consumer tag, an exclusive consumer in
+  the way) closed the whole connection with 541 INTERNAL_ERROR right after the channel.close, so
+  every other channel on it was lost. It now closes only the channel.
 - AMQP login rejected passwords and usernames containing spaces, and clients that send a PLAIN
   authorization identity equal to the username: the PLAIN response was split on spaces instead of
   on its NUL separators. It is now parsed as RFC 4616 `authzid NUL authcid NUL passwd`; an

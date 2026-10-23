@@ -428,7 +428,8 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 				amqpErr.MethodID(),
 				amqpErr.ReplyText(),
 			)
-			return nil, err
+			// Handled: returning it would also close the connection.
+			return nil, nil
 		}
 		log.Error().Err(err).Str("queue", queueName).Str("consumer_tag", consumerTag).Msg("Failed to register consumer")
 		return nil, err
