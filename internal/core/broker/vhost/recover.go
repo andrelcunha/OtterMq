@@ -26,9 +26,6 @@ func (vh *VHost) HandleBasicRecover(connID ConnectionID, channel uint16, requeue
 	ch.mu.Unlock()
 
 	for _, record := range unackedMessages {
-		if record.QueueDeleted {
-			continue // its queue is gone; nothing to requeue it to
-		}
 		vh.mu.Lock()
 		q := vh.Queues[record.QueueName]
 		vh.mu.Unlock()

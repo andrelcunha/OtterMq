@@ -338,9 +338,11 @@ func (vh *VHost) removeQueueConsumersLocked(queueName string) {
 }
 
 // detachQueueDeliveriesLocked marks every unacked delivery of a deleted
-// queue as such and files it under DELETED_QUEUE_SENTINEL. The client can
-// still ack it; nothing requeues it into a queue that later takes the name.
-// The caller holds vh.mu.
+// queue as such and drops it from UnackedByConsumer, keeping it only in
+// UnackedByTag. The client can still ack it, but a consumer that reuses the
+// tag doesn't inherit it (in its prefetch, or when it is canceled), and
+// nothing requeues it into a queue that later takes the name. The caller
+// holds vh.mu.
 func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
 	for _, state := range vh.ChannelDeliveries {
 		state.mu.Lock()
@@ -355,11 +357,6 @@ func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
 					delete(state.UnackedByConsumer, record.ConsumerTag)
 				}
 			}
-			record.ConsumerTag = DELETED_QUEUE_SENTINEL
-			if state.UnackedByConsumer[DELETED_QUEUE_SENTINEL] == nil {
-				state.UnackedByConsumer[DELETED_QUEUE_SENTINEL] = make(map[uint64]*DeliveryRecord)
-			}
-			state.UnackedByConsumer[DELETED_QUEUE_SENTINEL][deliveryTag] = record
 		}
 		state.mu.Unlock()
 	}
@@ -421,7 +418,7 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 		byQueue := make(map[string]int) // queue name -> index in work
 		for _, record := range unackedMessages {
 			queue, exists := vh.Queues[record.QueueName]
-			if !exists || record.QueueDeleted {
+			if !exists {
 				continue
 			}
 			i, seen := byQueue[record.QueueName]

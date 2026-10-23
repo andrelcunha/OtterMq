@@ -108,3 +108,43 @@ func TestDeletedQueueDeliveriesDoNotFollowReusedConsumerTag(t *testing.T) {
 		t.Errorf("ack of the deleted queue's delivery: %v", err)
 	}
 }
+
+// A delivery in flight when its queue is deleted, whose send then fails, is
+// dropped from both unacked indexes, leaving nothing behind on the channel.
+func TestDeletedQueueFailedInFlightDeliveryLeavesNoUnacked(t *testing.T) {
+	sender := newFailOnChannelSender(1)
+	sender.gate = make(chan struct{})
+	vh := newLoopTestVHost(t, sender)
+	connID := newTestConsumerConnID()
+	q, err := vh.CreateQueue("q", &QueueProperties{Arguments: map[string]any{}}, connID)
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	if _, err := vh.RegisterConsumer(NewConsumer(connID, 1, "q", "c", &ConsumerProperties{NoAck: false})); err != nil {
+		t.Fatalf("RegisterConsumer: %v", err)
+	}
+	q.Push(Message{ID: "m1"})
+	select {
+	case <-sender.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delivery did not start")
+	}
+	deleteWithin(t, vh, "q", time.Second)
+	close(sender.gate) // the send fails now
+
+	state := vh.GetOrCreateChannelDelivery(ConnectionChannelKey{connID, 1})
+	left := func() (byTag, byConsumer int) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		for _, m := range state.UnackedByConsumer {
+			byConsumer += len(m)
+		}
+		return len(state.UnackedByTag), byConsumer
+	}
+	if !waitFor(2*time.Second, func() bool { byTag, _ := left(); return byTag == 0 }) {
+		t.Fatal("the failed delivery is still tracked by delivery tag")
+	}
+	if _, byConsumer := left(); byConsumer != 0 {
+		t.Errorf("%d failed deliveries are still tracked by consumer", byConsumer)
+	}
+}
