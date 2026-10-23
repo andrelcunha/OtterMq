@@ -182,37 +182,54 @@ func TestDeleteVHostStaysInsideItsDir(t *testing.T) {
 }
 
 // A data dir written with the old layout (names used as path components) is
-// refused with an error that says what to do, instead of being misread.
+// refused with an error that says what to do, instead of being misread. That
+// includes vhost directories with no files: the old directory of vhost "nco"
+// would decode as vhost "f".
 func TestOldLayoutIsRefused(t *testing.T) {
-	data := t.TempDir()
-	old := filepath.Join(data, "vhosts", "%2F", "queues")
-	if err := os.MkdirAll(old, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(old, "orders.json"), []byte(`{"name":"orders"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for name, prepare := range map[string]func(t *testing.T, data string){
+		"queue file": func(t *testing.T, data string) {
+			old := filepath.Join(data, "vhosts", "%2F", "queues")
+			if err := os.MkdirAll(old, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(old, "orders.json"), []byte(`{"name":"orders"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"empty vhost dirs": func(t *testing.T, data string) {
+			for _, dir := range []string{"nco", "prod", "%2Fstaging"} {
+				if err := os.MkdirAll(filepath.Join(data, "vhosts", dir), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := t.TempDir()
+			prepare(t, data)
 
-	_, err := NewJsonPersistence(&persistence.Config{DataDir: data})
-	if err == nil {
-		t.Fatal("NewJsonPersistence accepted a data dir in the old layout")
-	}
-	for _, want := range []string{data, "layout"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(data, layoutFileName)); !os.IsNotExist(err) {
-		t.Errorf("a refused data dir got a layout marker: %v", err)
+			_, err := NewJsonPersistence(&persistence.Config{DataDir: data})
+			if err == nil {
+				t.Fatal("NewJsonPersistence accepted a data dir in the old layout")
+			}
+			for _, want := range []string{data, "layout"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(data, layoutFileName)); !os.IsNotExist(err) {
+				t.Errorf("a refused data dir got a layout marker: %v", err)
+			}
+		})
 	}
 }
 
-// A new data dir, and an old one with no persisted entities, get the
-// current layout and open again after a restart.
+// A new data dir, and one whose vhosts/ directory is empty, get the current
+// layout and open again after a restart.
 func TestNewDataDirGetsCurrentLayout(t *testing.T) {
 	for name, prepare := range map[string]func(string){
-		"empty":                  func(string) {},
-		"old dirs without files": func(d string) { _ = os.MkdirAll(filepath.Join(d, "vhosts", "%2F", "queues"), 0o755) },
+		"empty":            func(string) {},
+		"empty vhosts dir": func(d string) { _ = os.MkdirAll(filepath.Join(d, "vhosts"), 0o755) },
 	} {
 		data := t.TempDir()
 		prepare(data)

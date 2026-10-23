@@ -14,12 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The JSON persistence layout changed, and a data dir with durable entities from v0.21 or
   earlier is refused.** Queue, exchange and vhost names are now encoded into file names
   instead of being used as paths (#234). On startup the broker checks for
-  `<OTTERMQ_DATA_DIR>/persistence.json`. If it is missing and `vhosts/` holds entity files from
-  the old layout, the broker exits with an error rather than misreading them. To upgrade, back
-  up and remove `<OTTERMQ_DATA_DIR>/vhosts/`. Durable queues, exchanges, bindings and persistent
-  messages in it are lost; users and permissions (`ottermq.db`) are kept. Alternatively, keep
-  running v0.21.x until you can recreate those entities. Data dirs without durable entities
-  upgrade without any action.
+  `<OTTERMQ_DATA_DIR>/persistence.json`. If it is missing and `vhosts/` isn't empty, the data
+  dir is from the old layout and the broker exits with an error rather than misreading it. That
+  includes vhosts with no durable entities, whose old directory names can decode as other vhosts.
+  To upgrade, back up and remove `<OTTERMQ_DATA_DIR>/vhosts/`. Vhosts, durable queues, exchanges,
+  bindings and persistent messages in it are lost; users and permissions (`ottermq.db`) are kept.
+  Alternatively, keep running v0.21.x until you can recreate them. A data dir with no `vhosts/`
+  directory, or an empty one, upgrades without any action.
 
 ### Security
 

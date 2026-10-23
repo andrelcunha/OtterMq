@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,9 +146,10 @@ type layoutData struct {
 }
 
 // checkLayout makes sure the data dir uses the current layout. A data dir with
-// no marker and no entity files is new and gets one. One with entity files
-// but no marker was written by an older version, which used entity names as
-// file paths; it is refused rather than misread.
+// no marker and nothing in vhosts/ is new and gets one. One with anything in
+// vhosts/ but no marker was written by an older version, which used entity
+// names as file paths; it is refused rather than misread. That includes
+// vhost directories with no files: their old names can decode as other vhosts.
 func (jp *JsonPersistence) checkLayout() error {
 	marker := filepath.Join(jp.dataDir, layoutFileName)
 	data, err := os.ReadFile(marker)
@@ -167,13 +167,13 @@ func (jp *JsonPersistence) checkLayout() error {
 		return err
 	}
 
-	old, err := hasEntityFiles(jp.vhostsDir())
+	old, err := hasEntries(jp.vhostsDir())
 	if err != nil {
 		return err
 	}
 	if old {
 		return fmt.Errorf("data dir %s was written by OtterMQ v0.21 or earlier, whose persistence layout used queue, exchange and vhost names as file paths; "+
-			"this version can't read that layout. Back up and remove %s to start with an empty store (durable queues, exchanges and persistent messages in it are lost), "+
+			"this version can't read that layout. Back up and remove %s to start with an empty store (vhosts, durable queues, exchanges and persistent messages in it are lost), "+
 			"or keep running the previous version. See the upgrade notes in CHANGELOG.md", jp.dataDir, jp.vhostsDir())
 	}
 
@@ -184,21 +184,11 @@ func (jp *JsonPersistence) checkLayout() error {
 	return atomicWriteFile(marker, data, 0644)
 }
 
-// hasEntityFiles reports whether any .json file exists below dir.
-func hasEntityFiles(dir string) (bool, error) {
-	found := false
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".json") {
-			found = true
-			return fs.SkipAll
-		}
-		return nil
-	})
+// hasEntries reports whether dir exists and is not empty.
+func hasEntries(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
-	return found, err
+	return len(entries) > 0, err
 }
