@@ -67,9 +67,9 @@ func TestQueueDelete_Success_ReturnsMessageCount(t *testing.T) {
 	}
 }
 
-// TestQueueDelete_Exclusive_NonOwner_AccessRefused verifies that attempting to delete
-// an exclusive queue from a connection other than the owner results in ACCESS_REFUSED error.
-func TestQueueDelete_Exclusive_NonOwner_AccessRefused(t *testing.T) {
+// TestQueueDelete_Exclusive_NonOwner_ResourceLocked verifies that attempting to delete
+// an exclusive queue from a connection other than the owner results in RESOURCE_LOCKED error.
+func TestQueueDelete_Exclusive_NonOwner_ResourceLocked(t *testing.T) {
 
 	// Use unique queue name to avoid conflicts
 	queueName := fmt.Sprintf("e2e.qdel.excl.%d", time.Now().UnixNano())
@@ -109,13 +109,13 @@ func TestQueueDelete_Exclusive_NonOwner_AccessRefused(t *testing.T) {
 		t.Fatalf("expected error when non-owner deletes exclusive queue")
 	}
 
-	// Verify we got ACCESS_REFUSED error
+	// Verify we got RESOURCE_LOCKED error
 	amqpErr, ok := err.(*amqp.Error)
 	if !ok {
 		t.Fatalf("expected AMQP error, got: %T %v", err, err)
 	}
-	if amqpErr.Code != amqp.AccessRefused {
-		t.Errorf("expected ACCESS_REFUSED (403), got code %d: %s", amqpErr.Code, amqpErr.Reason)
+	if amqpErr.Code != amqp.ResourceLocked {
+		t.Errorf("expected RESOURCE_LOCKED (405), got code %d: %s", amqpErr.Code, amqpErr.Reason)
 	}
 	if !strings.Contains(strings.ToLower(amqpErr.Reason), "exclusive") {
 		t.Errorf("expected 'exclusive' in error reason, got: %s", amqpErr.Reason)

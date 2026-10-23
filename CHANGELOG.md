@@ -81,6 +81,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also saved and recovered with their exchange's arguments instead of their own. They are now saved
   with their own arguments, an unbind removes them from disk, and no arguments and an empty
   arguments table name the same binding (#298).
+- Other connections could consume from, `basic.get` from and redeclare (passively or not) an
+  exclusive queue, which belongs to the connection that declared it. They are now refused with a
+  405 RESOURCE_LOCKED channel exception, as in RabbitMQ. `queue.delete`, `queue.purge`,
+  `queue.bind` and `queue.unbind` already refused them, but with 403 ACCESS_REFUSED; they answer
+  405 too now (#324).
+- A refused `basic.consume` (no such queue, a duplicate consumer tag, an exclusive consumer in
+  the way) closed the whole connection with 541 INTERNAL_ERROR right after the channel.close, so
+  every other channel on it was lost. It now closes only the channel.
 - AMQP login rejected passwords and usernames containing spaces, and clients that send a PLAIN
   authorization identity equal to the username: the PLAIN response was split on spaces instead of
   on its NUL separators. It is now parsed as RFC 4616 `authzid NUL authcid NUL passwd`; an

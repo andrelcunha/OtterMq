@@ -45,7 +45,7 @@ func (vh *VHost) BindQueue(exchangeName, queueName, routingKey string, args map[
 	}
 	// If connID is INTERNAL_CONN_ID, it means this is a server-side binding (e.g., default exchange on queue creation)
 	if connID != INTERNAL_CONN_ID {
-		if err := vh.validateQueueOwnership(queue, connID, queueName); err != nil {
+		if err := vh.validateQueueOwnership(queue, connID, uint16(amqp.QUEUE), uint16(amqp.QUEUE_BIND)); err != nil {
 			return err
 		}
 	}
@@ -127,7 +127,7 @@ func (vh *VHost) UnbindQueue(exchangeName, queueName, routingKey string, args ma
 	// Note: Binding arguments are already used to identify bindings uniquely in DeleteBindingUnlocked
 	// Returns 404 NOT_FOUND if binding with matching args doesn't exist
 
-	if err := vh.validateQueueOwnership(queue, connID, queueName); err != nil {
+	if err := vh.validateQueueOwnership(queue, connID, uint16(amqp.QUEUE), uint16(amqp.QUEUE_UNBIND)); err != nil {
 		return err
 	}
 	switch exchange.Typ {
@@ -159,15 +159,27 @@ func (vh *VHost) UnbindQueue(exchangeName, queueName, routingKey string, args ma
 	return nil
 }
 
-func (*VHost) validateQueueOwnership(queue *Queue, connID ConnectionID, queueName string) error {
+// validateQueueOwnership refuses any use of an exclusive queue by a
+// connection other than the one that declared it, with a 405 RESOURCE_LOCKED
+// channel exception for the requested method, as RabbitMQ does.
+func (vh *VHost) validateQueueOwnership(queue *Queue, connID ConnectionID, classID, methodID uint16) error {
 	if queue.Props.Exclusive && queue.OwnerConn != connID {
-		return errors.NewChannelError(
-			fmt.Sprintf("queue '%s' is exclusive to another connection", queueName),
-			uint16(amqp.ACCESS_REFUSED),
-			uint16(amqp.QUEUE),
-			uint16(amqp.QUEUE_UNBIND))
+		text := amqp.RESOURCE_LOCKED.Format(fmt.Sprintf("cannot obtain exclusive access to locked queue '%s' in vhost '%s'", queue.Name, vh.Name))
+		return errors.NewChannelError(text, uint16(amqp.RESOURCE_LOCKED), classID, methodID)
 	}
 	return nil
+}
+
+// CheckQueueOwnership is validateQueueOwnership for callers outside the
+// vhost. A queue that doesn't exist passes; reporting it is up to the caller.
+func (vh *VHost) CheckQueueOwnership(queueName string, connID ConnectionID, classID, methodID uint16) error {
+	vh.mu.Lock()
+	queue, ok := vh.Queues[queueName]
+	vh.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return vh.validateQueueOwnership(queue, connID, classID, methodID)
 }
 
 func (vh *VHost) DeleteBindingUnlocked(exchange *Exchange, queueName, routingKey string, args map[string]interface{}) error {

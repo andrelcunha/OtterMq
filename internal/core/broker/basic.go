@@ -54,6 +54,14 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 	queue := getMsg.Queue
 	noAck := getMsg.NoAck
 
+	connID, ok := b.GetConnectionID(conn)
+	if !ok {
+		return nil, fmt.Errorf("connection not found")
+	}
+	if err := vh.CheckQueueOwnership(queue, connID, uint16(amqp.BASIC), uint16(amqp.BASIC_GET)); err != nil {
+		return sendChannelErrorResponse(err, b, conn, request)
+	}
+
 	msgCount, err := vh.GetMessageCount(queue)
 	if err != nil {
 		log.Error().Err(err).Msg("Error getting message count")
@@ -75,10 +83,6 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 	}
 
 	// Get or create the channel delivery state
-	connID, ok := b.GetConnectionID(conn)
-	if !ok {
-		return nil, fmt.Errorf("connection not found")
-	}
 	channelKey := vhost.ConnectionChannelKey{
 		ConnectionID: connID,
 		Channel:      request.Channel,
@@ -428,7 +432,8 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 				amqpErr.MethodID(),
 				amqpErr.ReplyText(),
 			)
-			return nil, err
+			// Handled: returning it would also close the connection.
+			return nil, nil
 		}
 		log.Error().Err(err).Str("queue", queueName).Str("consumer_tag", consumerTag).Msg("Failed to register consumer")
 		return nil, err

@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -215,7 +216,7 @@ func TestBasicConsumeHandler_EmptyConsumerTag(t *testing.T) {
 }
 
 func TestBasicConsumeHandler_NonExistentQueue(t *testing.T) {
-	broker, _, conn := createTestBroker()
+	broker, mockFramer, conn := createTestBroker()
 	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
@@ -235,14 +236,7 @@ func TestBasicConsumeHandler_NonExistentQueue(t *testing.T) {
 
 	_, err := broker.basicConsumeHandler(request, conn, vh)
 
-	if err == nil {
-		t.Error("Expected error for non-existent queue")
-	}
-
-	expectedError := "no queue 'non-existent-queue' in vhost 'test-vhost'"
-	if err != nil && strings.Contains(err.Error(), expectedError) == false {
-		t.Errorf("Expected error '%s', got '%s'", expectedError, err.Error())
-	}
+	assertConsumeChannelError(t, broker, mockFramer, conn, 1, err, amqp.NOT_FOUND, "no queue 'non-existent-queue' in vhost 'test-vhost'")
 
 	// Check that no consumer was registered
 	if len(vh.Consumers) != 0 {
@@ -251,7 +245,7 @@ func TestBasicConsumeHandler_NonExistentQueue(t *testing.T) {
 }
 
 func TestBasicConsumeHandler_DuplicateConsumer(t *testing.T) {
-	broker, _, conn := createTestBroker()
+	broker, mockFramer, conn := createTestBroker()
 	vh := broker.vhosts["test-vhost"]
 	connID := vhost.ConnectionID(GenerateConnectionID(conn))
 	// Register first consumer
@@ -283,18 +277,11 @@ func TestBasicConsumeHandler_DuplicateConsumer(t *testing.T) {
 
 	_, err = broker.basicConsumeHandler(request, conn, vh)
 
-	if err == nil {
-		t.Error("Expected error for duplicate consumer tag")
-	}
-
-	expectedError := "consumer tag 'duplicate-tag' already exists on channel 1"
-	if err != nil && strings.Contains(err.Error(), expectedError) == false {
-		t.Errorf("Expected error '%s', got '%s'", expectedError, err.Error())
-	}
+	assertConsumeChannelError(t, broker, mockFramer, conn, 1, err, amqp.PRECONDITION_FAILED, "consumer tag 'duplicate-tag' already exists on channel 1")
 }
 
 func TestBasicConsumeHandler_ExclusiveConsumer(t *testing.T) {
-	broker, _, conn := createTestBroker()
+	broker, mockFramer, conn := createTestBroker()
 	vh := broker.vhosts["test-vhost"]
 
 	// Register exclusive consumer
@@ -339,13 +326,27 @@ func TestBasicConsumeHandler_ExclusiveConsumer(t *testing.T) {
 
 	_, err = broker.basicConsumeHandler(request2, conn, vh)
 
-	if err == nil {
-		t.Error("Expected error when trying to add consumer to queue with exclusive consumer")
-	}
+	assertConsumeChannelError(t, broker, mockFramer, conn, 2, err, amqp.PRECONDITION_FAILED, "exclusive consumer already exists for queue test-queue")
+}
 
-	expectedError := "exclusive consumer already exists for queue test-queue"
-	if err != nil && strings.Contains(err.Error(), expectedError) == false {
-		t.Errorf("Expected error '%s', got '%s'", expectedError, err.Error())
+// assertConsumeChannelError checks that a refused basic.consume closed only
+// its channel: the handler returns no error (an error would close the whole
+// connection) and the last frame sent is channel.close with code and text.
+func assertConsumeChannelError(t *testing.T, broker *Broker, mockFramer *testutil.MockFramer, conn net.Conn, channel uint16, err error, code amqp.ReplyCode, text string) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("basicConsumeHandler returned %v; a channel error must not reach the connection", err)
+	}
+	if !broker.connInfos[conn].Channels[channel].ClosingChannel {
+		t.Errorf("channel %d not closing", channel)
+	}
+	if len(mockFramer.SentFrames) == 0 {
+		t.Fatal("no frame sent")
+	}
+	last := string(mockFramer.SentFrames[len(mockFramer.SentFrames)-1])
+	want := fmt.Sprintf("channel-close %d ", code)
+	if !strings.HasPrefix(last, want) || !strings.Contains(last, text) {
+		t.Errorf("sent %q, want channel.close %d with %q", last, code, text)
 	}
 }
 

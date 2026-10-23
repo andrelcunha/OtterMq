@@ -115,7 +115,7 @@ func (m *MockFramer) CreateChannelFlowOkFrame(channel uint16, active bool) []byt
 }
 
 func (m *MockFramer) CreateChannelCloseFrame(channel, replyCode, classID, methodID uint16, replyText string) []byte {
-	return []byte("channel-close")
+	return fmt.Appendf(nil, "channel-close %d %s", replyCode, replyText)
 }
 
 func (m *MockFramer) CreateChannelCloseOkFrame(channel uint16) []byte {
