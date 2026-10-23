@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,11 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	username, err := processStartOkContent(startOkFrame)
 	if err != nil {
 		return nil, err
+	}
+	if loopbackOnly(cfg.LoopbackUsers, username) && !isLoopbackAddr(conn.RemoteAddr()) {
+		text := fmt.Sprintf("user '%s' can only connect from localhost", username)
+		sendHandshakeClose(conn, ACCESS_REFUSED, uint16(CONNECTION_START_OK), text)
+		return nil, fmt.Errorf("%s (remote %s)", text, conn.RemoteAddr())
 	}
 	log.Debug().Str("remote", conn.RemoteAddr().String()).Str("local", conn.LocalAddr().String()).Msg("Handshake - Started")
 
@@ -209,6 +215,21 @@ func sendHandshakeClose(conn net.Conn, replyCode ReplyCode, methodID uint16, tex
 	if err := sendFrame(conn, frame); err != nil {
 		log.Debug().Err(err).Msg("Failed to send connection.close during handshake")
 	}
+}
+
+// loopbackOnly reports whether user is one of loopbackUsers.
+func loopbackOnly(loopbackUsers []string, user string) bool {
+	return slices.Contains(loopbackUsers, user)
+}
+
+// isLoopbackAddr reports whether addr is a loopback IP address.
+func isLoopbackAddr(addr net.Addr) bool {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func processStartOkContent(startOkFrame *ConnectionStartOk) (string, error) {

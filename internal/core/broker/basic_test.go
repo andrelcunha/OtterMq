@@ -42,11 +42,11 @@ func createTestBroker() (*Broker, *testutil.MockFramer, net.Conn) {
 	mockFramer := &testutil.MockFramer{}
 	mockCollector := metrics.NewMockCollector(nil)
 	broker := &Broker{
-		framer:      mockFramer,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		connToID:    make(map[net.Conn]vhost.ConnectionID),
-		VHosts:      make(map[string]*vhost.VHost),
-		collector:   mockCollector,
+		framer:    mockFramer,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		connToID:  make(map[net.Conn]vhost.ConnectionID),
+		vhosts:    make(map[string]*vhost.VHost),
+		collector: mockCollector,
 	}
 
 	// Create test vhost with a test queue
@@ -64,7 +64,7 @@ func createTestBroker() (*Broker, *testutil.MockFramer, net.Conn) {
 		Exclusive:  false,
 		Arguments:  nil,
 	}
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{"tcp", "127.0.0.1:5672"},
@@ -72,7 +72,7 @@ func createTestBroker() (*Broker, *testutil.MockFramer, net.Conn) {
 	}
 
 	// Initialize connection state with Client info (needed for metrics)
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 		Client: &amqp.AmqpClient{
@@ -81,7 +81,7 @@ func createTestBroker() (*Broker, *testutil.MockFramer, net.Conn) {
 			},
 		},
 	}
-	broker.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 
 	// Register connection ID
 	connID := vhost.ConnectionID(GenerateConnectionID(conn))
@@ -92,7 +92,7 @@ func createTestBroker() (*Broker, *testutil.MockFramer, net.Conn) {
 
 func TestBasicConsumeHandler_ValidConsumer(t *testing.T) {
 	broker, mockFramer, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
 		Channel:  1,
@@ -166,7 +166,7 @@ func TestBasicConsumeHandler_ValidConsumer(t *testing.T) {
 
 func TestBasicConsumeHandler_EmptyConsumerTag(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
 		Channel:  1,
@@ -216,7 +216,7 @@ func TestBasicConsumeHandler_EmptyConsumerTag(t *testing.T) {
 
 func TestBasicConsumeHandler_NonExistentQueue(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
 		Channel:  1,
@@ -252,7 +252,7 @@ func TestBasicConsumeHandler_NonExistentQueue(t *testing.T) {
 
 func TestBasicConsumeHandler_DuplicateConsumer(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 	connID := vhost.ConnectionID(GenerateConnectionID(conn))
 	// Register first consumer
 	consumer1 := vhost.NewConsumer(connID, 1, "test-queue", "duplicate-tag", &vhost.ConsumerProperties{
@@ -295,7 +295,7 @@ func TestBasicConsumeHandler_DuplicateConsumer(t *testing.T) {
 
 func TestBasicConsumeHandler_ExclusiveConsumer(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	// Register exclusive consumer
 	request1 := &amqp.RequestMethodMessage{
@@ -335,7 +335,7 @@ func TestBasicConsumeHandler_ExclusiveConsumer(t *testing.T) {
 	}
 
 	// Initialize channel 2
-	broker.Connections[conn].Channels[2] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[2] = &amqp.ChannelState{}
 
 	_, err = broker.basicConsumeHandler(request2, conn, vh)
 
@@ -351,7 +351,7 @@ func TestBasicConsumeHandler_ExclusiveConsumer(t *testing.T) {
 
 func TestBasicConsumeHandler_NoWaitFlag(t *testing.T) {
 	broker, mockFramer, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
 		Channel:  1,
@@ -388,7 +388,7 @@ func TestBasicConsumeHandler_NoWaitFlag(t *testing.T) {
 
 func TestBasicConsumeHandler_WithArguments(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	arguments := map[string]any{
 		"x-priority":     int32(10),
@@ -516,7 +516,7 @@ func TestBasicReturn_FrameSendError(t *testing.T) {
 
 func TestBasicPublishHandler_WithMandatoryFlag_NoRouting(t *testing.T) {
 	broker, mockFramer, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	// Create an exchange without bindings
 	vh.Exchanges["no-route-ex"] = &vhost.Exchange{
@@ -527,7 +527,7 @@ func TestBasicPublishHandler_WithMandatoryFlag_NoRouting(t *testing.T) {
 	}
 
 	// Setup channel state with publish request
-	channelState := broker.Connections[conn].Channels[1]
+	channelState := broker.connInfos[conn].Channels[1]
 	channelState.MethodFrame = &amqp.RequestMethodMessage{
 		Channel:  1,
 		ClassID:  60,
@@ -578,7 +578,7 @@ func TestBasicPublishHandler_WithMandatoryFlag_NoRouting(t *testing.T) {
 
 func TestBasicPublishHandler_WithMandatoryFlag_WithRouting(t *testing.T) {
 	broker, mockFramer, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	// Create an exchange with binding
 	queue := vh.Queues["test-queue"]
@@ -594,7 +594,7 @@ func TestBasicPublishHandler_WithMandatoryFlag_WithRouting(t *testing.T) {
 	}
 
 	// Setup channel state with publish request
-	channelState := broker.Connections[conn].Channels[1]
+	channelState := broker.connInfos[conn].Channels[1]
 	channelState.MethodFrame = &amqp.RequestMethodMessage{
 		Channel:  1,
 		ClassID:  60,
@@ -642,7 +642,7 @@ func TestBasicPublishHandler_WithMandatoryFlag_WithRouting(t *testing.T) {
 
 func TestBasicPublishHandler_WithoutMandatoryFlag_NoRouting(t *testing.T) {
 	broker, mockFramer, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	// Create an exchange without bindings
 	vh.Exchanges["no-route-ex"] = &vhost.Exchange{
@@ -653,7 +653,7 @@ func TestBasicPublishHandler_WithoutMandatoryFlag_NoRouting(t *testing.T) {
 	}
 
 	// Setup channel state with publish request
-	channelState := broker.Connections[conn].Channels[1]
+	channelState := broker.connInfos[conn].Channels[1]
 	channelState.MethodFrame = &amqp.RequestMethodMessage{
 		Channel:  1,
 		ClassID:  60,
@@ -697,7 +697,7 @@ func TestBasicPublishHandler_WithoutMandatoryFlag_NoRouting(t *testing.T) {
 
 func TestBasicConsumeHandler_InvalidContent(t *testing.T) {
 	broker, _, conn := createTestBroker()
-	vh := broker.VHosts["test-vhost"]
+	vh := broker.vhosts["test-vhost"]
 
 	request := &amqp.RequestMethodMessage{
 		Channel:  1,

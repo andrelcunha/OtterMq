@@ -55,7 +55,6 @@ func (b *Broker) handleOpenChannel(request *amqp.RequestMethodMessage, conn net.
 		return nil, fmt.Errorf("channel already open")
 	}
 	b.registerChannel(conn, request)
-	log.Trace().Interface("state", b.Connections[conn].Channels[request.Channel]).Msg("New state added")
 
 	frame := b.framer.CreateChannelOpenOkFrame(request.Channel)
 	if err := b.framer.SendFrame(conn, frame); err != nil {
@@ -89,9 +88,7 @@ func (b *Broker) handleChannelFlow(request *amqp.RequestMethodMessage, vh *vhost
 	flowActive := content.Active
 	// Record channel flow change
 	b.collector.RecordChannelFlow(conn.RemoteAddr().String(), vh.Name, channel, flowActive)
-	b.mu.Lock()
-	_, exists := b.Connections[conn].Channels[channel]
-	b.mu.Unlock()
+	_, exists := b.channelState(conn, channel)
 	if !exists {
 		// Client tried to use a non-registered channel -- it should send a channel.open first
 		// Architecture decision: enforce that client must open the channel first
@@ -158,9 +155,7 @@ func (b *Broker) handleChannelFlow(request *amqp.RequestMethodMessage, vh *vhost
 // Since the broker does not currently initiate flow control, this method just verifies if the channel exists.
 func (b *Broker) handleChannelFlowOk(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
 	channel := request.Channel
-	b.mu.Lock()
-	_, exists := b.Connections[conn].Channels[channel]
-	b.mu.Unlock()
+	_, exists := b.channelState(conn, channel)
 	if !exists {
 		log.Debug().Uint16("channel", channel).Msg("Channel not found for flow ok")
 		// raise 504 error if channel not found
@@ -185,9 +180,7 @@ func (b *Broker) handleChannelFlowOk(request *amqp.RequestMethodMessage, conn ne
 }
 
 func (b *Broker) handleChannelClose(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
-	b.mu.Lock()
-	_, exists := b.Connections[conn].Channels[request.Channel]
-	b.mu.Unlock()
+	_, exists := b.channelState(conn, request.Channel)
 	if !exists {
 		log.Debug().Uint16("channel", request.Channel).Msg("Channel already closed") // no need to rise an error here
 		return nil, nil
@@ -216,10 +209,13 @@ func (b *Broker) registerChannel(conn net.Conn, frame *amqp.RequestMethodMessage
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.Connections[conn].Channels[frame.Channel] = &amqp.ChannelState{MethodFrame: frame}
+	conInfo, ok := b.connInfos[conn]
+	if !ok {
+		return
+	}
+	conInfo.Channels[frame.Channel] = &amqp.ChannelState{MethodFrame: frame}
 	log.Debug().Uint16("channel", frame.Channel).Msg("New channel added")
 	connName := conn.RemoteAddr().String()
-	conInfo := b.Connections[conn]
 	user := conInfo.Client.Config.Username
 	b.collector.RecordChannelOpen(connName, conInfo.VHostName, user, frame.Channel)
 }
@@ -228,15 +224,17 @@ func (b *Broker) registerChannel(conn net.Conn, frame *amqp.RequestMethodMessage
 func (b *Broker) removeChannel(conn net.Conn, channel uint16) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.Connections[conn].Channels, channel)
+	connInfo, ok := b.connInfos[conn]
+	if !ok {
+		return
+	}
+	delete(connInfo.Channels, channel)
 	connName := conn.RemoteAddr().String()
 	b.collector.RecordChannelClose(connName, channel)
 }
 
 // checkChannel checks if a channel is already open
 func (b *Broker) checkChannel(conn net.Conn, channel uint16) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, ok := b.Connections[conn].Channels[channel]
+	_, ok := b.channelState(conn, channel)
 	return ok
 }

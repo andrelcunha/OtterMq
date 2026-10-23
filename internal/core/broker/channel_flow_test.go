@@ -29,11 +29,11 @@ func TestHandleChannelFlow_ClientRequest(t *testing.T) {
 	mockFramer := &testutil.MockFramer{}
 	mockCollector := metrics.NewMockCollector(nil)
 	broker := &Broker{
-		framer:      mockFramer,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		connToID:    make(map[net.Conn]vhost.ConnectionID),
-		VHosts:      make(map[string]*vhost.VHost),
-		collector:   mockCollector,
+		framer:    mockFramer,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		connToID:  make(map[net.Conn]vhost.ConnectionID),
+		vhosts:    make(map[string]*vhost.VHost),
+		collector: mockCollector,
 	}
 
 	var options = vhost.VHostOptions{
@@ -42,7 +42,7 @@ func TestHandleChannelFlow_ClientRequest(t *testing.T) {
 	}
 	vh := vhost.NewVhost("test-vhost", options)
 	vh.SetMetricsCollector(mockCollector)
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{network: "tcp", address: "127.0.0.1:5672"},
@@ -51,11 +51,11 @@ func TestHandleChannelFlow_ClientRequest(t *testing.T) {
 	connID := vhost.ConnectionID(GenerateConnectionID(conn))
 
 	// Initialize connection
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 	}
-	broker.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 
 	// Register connection ID
 	broker.connToID[conn] = connID
@@ -112,9 +112,9 @@ func TestHandleChannelFlow_ClientRequest(t *testing.T) {
 func TestHandleChannelFlow_InvalidContent(t *testing.T) {
 	mockFramer := &testutil.MockFramer{}
 	broker := &Broker{
-		framer:      mockFramer,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		VHosts:      make(map[string]*vhost.VHost),
+		framer:    mockFramer,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		vhosts:    make(map[string]*vhost.VHost),
 	}
 
 	var options = vhost.VHostOptions{
@@ -122,18 +122,18 @@ func TestHandleChannelFlow_InvalidContent(t *testing.T) {
 		Persistence:     &dummy.DummyPersistence{},
 	}
 	vh := vhost.NewVhost("test-vhost", options)
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{network: "tcp", address: "127.0.0.1:5672"},
 		remoteAddr: &MockAddr{network: "tcp", address: "127.0.0.1:12345"},
 	}
 
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 	}
-	broker.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 
 	// Test with wrong content type
 	request := &amqp.RequestMethodMessage{
@@ -152,10 +152,10 @@ func TestHandleChannelFlow_NonExistentChannel(t *testing.T) {
 	mockFramer := &testutil.MockFramer{}
 	mockCollector := metrics.NewMockCollector(nil)
 	broker := &Broker{
-		framer:      mockFramer,
-		collector:   mockCollector,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		VHosts:      make(map[string]*vhost.VHost),
+		framer:    mockFramer,
+		collector: mockCollector,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		vhosts:    make(map[string]*vhost.VHost),
 	}
 
 	var options = vhost.VHostOptions{
@@ -164,14 +164,14 @@ func TestHandleChannelFlow_NonExistentChannel(t *testing.T) {
 	}
 	vh := vhost.NewVhost("test-vhost", options)
 	vh.SetMetricsCollector(mockCollector)
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{network: "tcp", address: "127.0.0.1:5672"},
 		remoteAddr: &MockAddr{network: "tcp", address: "127.0.0.1:12345"},
 	}
 
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 	}
@@ -205,9 +205,9 @@ func TestBasicPublish_WithServerFlowPaused(t *testing.T) {
 func TestHandleChannelFlowOk(t *testing.T) {
 	mockFramer := &testutil.MockFramer{}
 	broker := &Broker{
-		framer:      mockFramer,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		VHosts:      make(map[string]*vhost.VHost),
+		framer:    mockFramer,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		vhosts:    make(map[string]*vhost.VHost),
 	}
 
 	var options = vhost.VHostOptions{
@@ -215,18 +215,18 @@ func TestHandleChannelFlowOk(t *testing.T) {
 		Persistence:     &dummy.DummyPersistence{},
 	}
 	vh := vhost.NewVhost("test-vhost", options)
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{network: "tcp", address: "127.0.0.1:5672"},
 		remoteAddr: &MockAddr{network: "tcp", address: "127.0.0.1:12345"},
 	}
 
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 	}
-	broker.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 
 	// Test flow-ok handling
 	request := &amqp.RequestMethodMessage{

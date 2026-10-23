@@ -17,11 +17,11 @@ func createTestBrokerForTx() (*Broker, *testutil.MockFramer, net.Conn, *vhost.VH
 	mockFramer := &testutil.MockFramer{}
 	mockCollector := metrics.NewMockCollector(nil)
 	broker := &Broker{
-		framer:      mockFramer,
-		collector:   mockCollector,
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		connToID:    make(map[net.Conn]vhost.ConnectionID),
-		VHosts:      make(map[string]*vhost.VHost),
+		framer:    mockFramer,
+		collector: mockCollector,
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		connToID:  make(map[net.Conn]vhost.ConnectionID),
+		vhosts:    make(map[string]*vhost.VHost),
 	}
 
 	// Create test vhost with queues and exchanges
@@ -54,7 +54,7 @@ func createTestBrokerForTx() (*Broker, *testutil.MockFramer, net.Conn, *vhost.VH
 	}
 	vh.Exchanges["test-exchange"] = exchange
 
-	broker.VHosts["test-vhost"] = vh
+	broker.vhosts["test-vhost"] = vh
 
 	conn := &MockConnection{
 		localAddr:  &MockAddr{"tcp", "127.0.0.1:5672"},
@@ -62,11 +62,11 @@ func createTestBrokerForTx() (*Broker, *testutil.MockFramer, net.Conn, *vhost.VH
 	}
 
 	// Initialize connection state
-	broker.Connections[conn] = &amqp.ConnectionInfo{
+	broker.connInfos[conn] = &amqp.ConnectionInfo{
 		VHostName: "test-vhost",
 		Channels:  make(map[uint16]*amqp.ChannelState),
 	}
-	broker.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	broker.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 
 	return broker, mockFramer, conn, vh
 }

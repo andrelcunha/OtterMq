@@ -139,7 +139,7 @@ func TestHandshakeFinishingDuringShutdownIsNotRegistered(t *testing.T) {
 	_ = conn
 
 	b.mu.Lock()
-	n := len(b.Connections)
+	n := len(b.connInfos)
 	b.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("%d connections registered after shutdown began, want 0", n)

@@ -2,6 +2,7 @@ package prometheus
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/ottermq/ottermq/web/middleware"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,6 +25,7 @@ func (s *Server) Setup() {
 		DisableStartupMessage: true,
 		EnablePrintRoutes:     false,
 	})
+	s.app.Use(middleware.Recover())
 	s.app.Get(s.config.Path, MetricsHandler())
 
 	s.app.Get("/health", func(c *fiber.Ctx) error {

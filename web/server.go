@@ -1,10 +1,8 @@
 package web
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 
 	"github.com/ottermq/ottermq/internal/core/broker"
@@ -18,7 +16,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,6 +30,7 @@ type Config struct {
 	Username      string
 	Password      string
 	JwtKey        string
+	LoopbackUsers []string
 	WebServerPort string
 	EnableUI      bool
 	EnableSwagger bool
@@ -98,7 +96,7 @@ func (ws *WebServer) addUIFallback(app *fiber.App, uiPath string) {
 
 func (ws *WebServer) AddApi(app *fiber.App) {
 	// Public API routes
-	app.Post(ws.config.ApiPrefix+"/login", api_admin.Login(ws.config.JwtKey))
+	app.Post(ws.config.ApiPrefix+"/login", api_admin.Login(ws.config.JwtKey, ws.config.LoopbackUsers))
 
 	app.Get(ws.config.ApiPrefix+"/overview/broker", middleware.JwtMiddleware(ws.config.JwtKey), func(c *fiber.Ctx) error {
 		return api.GetBasicBrokerInfo(c, ws.Broker)
@@ -313,15 +311,6 @@ func (ws *WebServer) configServer(logFile *os.File) *fiber.App {
 		Output: logFile,
 	}))
 
-	// A panic in a handler fails only its request with 500. Without this, it
-	// would end the process, taking the AMQP broker down with the web API.
-	app.Use(recover.New(recover.Config{
-		EnableStackTrace: true,
-		StackTraceHandler: func(c *fiber.Ctx, e any) {
-			log.Error().Str("method", c.Method()).Str("path", c.Path()).
-				Str("panic", fmt.Sprint(e)).Str("stack", string(debug.Stack())).
-				Msg("Recovered panic in web handler")
-		},
-	}))
+	app.Use(middleware.Recover())
 	return app
 }

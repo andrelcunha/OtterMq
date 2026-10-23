@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,18 +54,16 @@ func (jp *JsonPersistence) Initialize() error {
 	if err := mkdirAllDurable(jp.dataDir, 0755); err != nil {
 		return err
 	}
+	if err := jp.checkLayout(); err != nil {
+		return err
+	}
 	// Discard writes a crash interrupted before their rename
-	return removeStrayTempFiles(filepath.Join(jp.dataDir, "vhosts"))
+	return removeStrayTempFiles(jp.vhostsDir())
 }
 
 func (jp *JsonPersistence) Close() error {
 	// JSON implementation doesn't need to clean up
 	return nil
-}
-
-// safeVHostName encodes vhost names for safe filesystem usage
-func safeVHostName(name string) string {
-	return url.PathEscape(name)
 }
 
 // lockFile locks the stripe that guards path and returns its unlock function.
@@ -79,18 +76,19 @@ func (jp *JsonPersistence) lockFile(path string) func() {
 }
 
 func (jp *JsonPersistence) exchangeFile(vhost, name string) string {
-	return filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "exchanges", name+".json")
+	return filepath.Join(jp.exchangesDir(vhost), encodeName(name)+".json")
 }
 
 func (jp *JsonPersistence) queueFile(vhost, name string) string {
-	return filepath.Join(jp.dataDir, "vhosts", safeVHostName(vhost), "queues", name+".json")
+	return filepath.Join(jp.queuesDir(vhost), encodeName(name)+".json")
 }
 
 // SaveExchangeMetadata persists exchange metadata to a JSON file
 func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string, props persistence.ExchangeProperties) error {
-	safeName := safeVHostName(vhost)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges")
-	if err := mkdirAllDurable(dir, 0755); err != nil {
+	if err := jp.ensureVHostDir(vhost); err != nil {
+		return err
+	}
+	if err := mkdirAllDurable(jp.exchangesDir(vhost), 0755); err != nil {
 		return err
 	}
 
@@ -99,7 +97,7 @@ func (jp *JsonPersistence) SaveExchangeMetadata(vhost, name, exchangeType string
 		Type:       exchangeType,
 		Properties: props,
 	}
-	file := filepath.Join(dir, name+".json")
+	file := jp.exchangeFile(vhost, name)
 	defer jp.lockFile(file)()
 	data, err := json.MarshalIndent(exchangeData, "", "  ")
 	if err != nil {
@@ -132,9 +130,10 @@ func (jp *JsonPersistence) DeleteExchangeMetadata(vhost, name string) error {
 
 // SaveQueueMetadata persists a single queue's metadata to a JSON file
 func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persistence.QueueProperties) error {
-	safeName := safeVHostName(vhost)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "queues")
-	if err := mkdirAllDurable(dir, 0755); err != nil {
+	if err := jp.ensureVHostDir(vhost); err != nil {
+		return err
+	}
+	if err := mkdirAllDurable(jp.queuesDir(vhost), 0755); err != nil {
 		return err
 	}
 
@@ -145,7 +144,7 @@ func (jp *JsonPersistence) SaveQueueMetadata(vhost, name string, props persisten
 		Messages:   []JsonMessageData{}, // Preserve existing messages
 	}
 
-	file := filepath.Join(dir, name+".json")
+	file := jp.queueFile(vhost, name)
 	defer jp.lockFile(file)()
 
 	// For JSON implementation, we need to preserve existing messages if they exist
@@ -332,8 +331,7 @@ func (jp *JsonPersistence) DeleteMessage(vhost, queue, msgId string) error {
 }
 
 func (jp *JsonPersistence) LoadAllExchanges(vhost string) ([]persistence.ExchangeSnapshot, error) {
-	safeName := safeVHostName(vhost)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "exchanges")
+	dir := jp.exchangesDir(vhost)
 
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -348,10 +346,13 @@ func (jp *JsonPersistence) LoadAllExchanges(vhost string) ([]persistence.Exchang
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		name := strings.TrimSuffix(entry.Name(), ".json")
-		exchangeData, err := jp.lockedLoadExchangeFile(jp.exchangeFile(vhost, name))
+		exchangeData, err := jp.lockedLoadExchangeFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			continue // Skip corrupt files
+		}
+		name, ok := entityName(entry.Name(), exchangeData.Name)
+		if !ok {
+			continue // Not a file this layout writes
 		}
 
 		snapshots = append(snapshots, persistence.ExchangeSnapshot{
@@ -365,8 +366,7 @@ func (jp *JsonPersistence) LoadAllExchanges(vhost string) ([]persistence.Exchang
 }
 
 func (jp *JsonPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnapshot, error) {
-	safeName := safeVHostName(vhost)
-	dir := filepath.Join(jp.dataDir, "vhosts", safeName, "queues")
+	dir := jp.queuesDir(vhost)
 
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -381,10 +381,13 @@ func (jp *JsonPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnaps
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		name := strings.TrimSuffix(entry.Name(), ".json")
-		queueData, err := jp.lockedLoadQueueFile(jp.queueFile(vhost, name))
+		queueData, err := jp.lockedLoadQueueFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			continue // Skip corrupt files
+		}
+		name, ok := entityName(entry.Name(), queueData.Name)
+		if !ok {
+			continue // Not a file this layout writes
 		}
 
 		var messages []persistence.Message
@@ -407,20 +410,22 @@ func (jp *JsonPersistence) LoadAllQueues(vhost string) ([]persistence.QueueSnaps
 
 // SaveVHostMetadata ensures the vhost directory exists on disk.
 func (jp *JsonPersistence) SaveVHostMetadata(name string) error {
-	dir := filepath.Join(jp.dataDir, "vhosts", safeVHostName(name))
-	return mkdirAllDurable(dir, 0755)
+	return jp.ensureVHostDir(name)
 }
 
 // DeleteVHostMetadata removes the entire vhost directory tree.
 func (jp *JsonPersistence) DeleteVHostMetadata(name string) error {
-	dir := filepath.Join(jp.dataDir, "vhosts", safeVHostName(name))
+	dir := jp.vhostDir(name)
+	if err := jp.checkVHostDir(dir); err != nil {
+		return err
+	}
 	return os.RemoveAll(dir)
 }
 
 // LoadAllVHosts returns the names of all persisted vhosts by reading the
-// vhosts/ directory. The safe-encoded directory names are decoded back.
+// vhosts/ directory. The encoded directory names are decoded back.
 func (jp *JsonPersistence) LoadAllVHosts() ([]string, error) {
-	dir := filepath.Join(jp.dataDir, "vhosts")
+	dir := jp.vhostsDir()
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -433,9 +438,9 @@ func (jp *JsonPersistence) LoadAllVHosts() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		name, err := url.PathUnescape(e.Name())
-		if err != nil {
-			name = e.Name()
+		name, ok := jp.vhostName(e.Name())
+		if !ok {
+			continue // Not a directory this layout writes
 		}
 		names = append(names, name)
 	}

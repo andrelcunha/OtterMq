@@ -186,6 +186,30 @@ func (vh *VHost) GetChannelDelivery(channelKey ConnectionChannelKey) *ChannelDel
 	return ch
 }
 
+// ChannelDeliveryStats is a consistent copy of the delivery counters the
+// management API reports for a channel.
+type ChannelDeliveryStats struct {
+	UnackedCount  int
+	PrefetchCount uint16
+	FlowActive    bool
+}
+
+// GetChannelDeliveryStats returns the channel's delivery counters, read under
+// the channel's lock. ok is false if the channel has no delivery state yet.
+func (vh *VHost) GetChannelDeliveryStats(channelKey ConnectionChannelKey) (stats ChannelDeliveryStats, ok bool) {
+	state := vh.GetChannelDelivery(channelKey)
+	if state == nil {
+		return ChannelDeliveryStats{}, false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return ChannelDeliveryStats{
+		UnackedCount:  len(state.UnackedByTag),
+		PrefetchCount: state.NextPrefetchCount,
+		FlowActive:    state.FlowActive,
+	}, true
+}
+
 func (vh *VHost) ShouldRedeliver(msgID string) bool {
 	vh.redeliveredMu.Lock()
 	_, exists := vh.redeliveredMessages[msgID]

@@ -54,6 +54,8 @@ type HandshakeConfig struct {
 	Locales          []string
 	SSL              bool
 	Tuning           ServerTuning
+	// LoopbackUsers may only connect from a loopback address.
+	LoopbackUsers []string
 }
 
 // TuneError is returned by Negotiate when the client's connection.tune-ok

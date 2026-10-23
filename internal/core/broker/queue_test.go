@@ -83,9 +83,9 @@ func TestQueuePurgeHandler_Success(t *testing.T) {
 
 func TestQueuePurgeHandler_QueueNotFound_SendsChannelClose(t *testing.T) {
 	b := &Broker{
-		framer:      &amqp.DefaultFramer{},
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		connToID:    make(map[net.Conn]vhost.ConnectionID),
+		framer:    &amqp.DefaultFramer{},
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		connToID:  make(map[net.Conn]vhost.ConnectionID),
 	}
 
 	var options = vhost.VHostOptions{
@@ -100,8 +100,8 @@ func TestQueuePurgeHandler_QueueNotFound_SendsChannelClose(t *testing.T) {
 
 	// Register connection and channel so sendChannelErrorResponse can mark closing
 	b.mu.Lock()
-	b.Connections[conn] = &amqp.ConnectionInfo{Channels: make(map[uint16]*amqp.ChannelState)}
-	b.Connections[conn].Channels[1] = &amqp.ChannelState{}
+	b.connInfos[conn] = &amqp.ConnectionInfo{Channels: make(map[uint16]*amqp.ChannelState)}
+	b.connInfos[conn].Channels[1] = &amqp.ChannelState{}
 	b.mu.Unlock()
 
 	// Register connection ID
@@ -124,7 +124,7 @@ func TestQueuePurgeHandler_QueueNotFound_SendsChannelClose(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	if !b.Connections[conn].Channels[1].ClosingChannel {
+	if !b.connInfos[conn].Channels[1].ClosingChannel {
 		t.Error("Expected channel to be marked as closing")
 	}
 	b.mu.Unlock()
@@ -218,9 +218,9 @@ func TestQueueUnbindHandler_Success(t *testing.T) {
 
 func TestQueueUnbindHandler_ExchangeNotFound(t *testing.T) {
 	b := &Broker{
-		framer:      &amqp.DefaultFramer{},
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
-		connToID:    make(map[net.Conn]vhost.ConnectionID),
+		framer:    &amqp.DefaultFramer{},
+		connInfos: make(map[net.Conn]*amqp.ConnectionInfo),
+		connToID:  make(map[net.Conn]vhost.ConnectionID),
 	}
 
 	var options = vhost.VHostOptions{
@@ -238,10 +238,10 @@ func TestQueueUnbindHandler_ExchangeNotFound(t *testing.T) {
 
 	// Register connection and channel in broker
 	b.mu.Lock()
-	b.Connections[conn] = &amqp.ConnectionInfo{
+	b.connInfos[conn] = &amqp.ConnectionInfo{
 		Channels: make(map[uint16]*amqp.ChannelState),
 	}
-	b.Connections[conn].Channels[1] = &amqp.ChannelState{
+	b.connInfos[conn].Channels[1] = &amqp.ChannelState{
 		ClosingChannel: false,
 	}
 	b.mu.Unlock()
@@ -283,7 +283,7 @@ func TestQueueUnbindHandler_ExchangeNotFound(t *testing.T) {
 
 	// Verify channel is marked as closing
 	b.mu.Lock()
-	if !b.Connections[conn].Channels[1].ClosingChannel {
+	if !b.connInfos[conn].Channels[1].ClosingChannel {
 		t.Error("Expected channel to be marked as closing")
 	}
 	b.mu.Unlock()

@@ -13,7 +13,7 @@ import (
 func connectionCount(b *Broker) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return len(b.Connections)
+	return len(b.connInfos)
 }
 
 // waitNoConnections waits for the broker to deregister every connection.

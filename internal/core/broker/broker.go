@@ -32,11 +32,18 @@ const (
 	DEFAULT_VHOST    = "/"
 )
 
+// Locks: mu guards vhosts, connInfos and every ConnectionInfo's Channels
+// map. connectionsMu guards connections and connToID. Lock order: mu, then a
+// vhost's locks (vh.mu, then a channel's delivery state), then connectionsMu,
+// which is always taken last. A transaction commit holds its transaction's
+// lock while it takes mu, so never take a transaction's lock under mu. Go
+// through the accessors in conn_state.go rather than indexing the maps
+// directly.
 type Broker struct {
-	VHosts       map[string]*vhost.VHost
+	vhosts       map[string]*vhost.VHost
 	config       *config.Config                    `json:"-"`
 	listener     net.Listener                      `json:"-"`
-	Connections  map[net.Conn]*amqp.ConnectionInfo `json:"-"`
+	connInfos    map[net.Conn]*amqp.ConnectionInfo `json:"-"`
 	mu           sync.Mutex                        `json:"-"`
 	framer       amqp.Framer
 	ShuttingDown atomic.Bool
@@ -74,8 +81,8 @@ func NewBroker(config *config.Config, rootCtx context.Context, rootCancel contex
 	}
 
 	b := &Broker{
-		VHosts:      make(map[string]*vhost.VHost),
-		Connections: make(map[net.Conn]*amqp.ConnectionInfo),
+		vhosts:      make(map[string]*vhost.VHost),
+		connInfos:   make(map[net.Conn]*amqp.ConnectionInfo),
 		connections: make(map[vhost.ConnectionID]net.Conn),
 		connToID:    make(map[net.Conn]vhost.ConnectionID),
 		config:      config,
@@ -100,7 +107,7 @@ func NewBroker(config *config.Config, rootCtx context.Context, rootCancel contex
 	b.framer = &amqp.DefaultFramer{}
 	b.SetupMetricsCollector(collector, config.EnableMetrics)
 
-	b.VHosts[DEFAULT_VHOST] = initializeVHost(DEFAULT_VHOST, options, b)
+	b.vhosts[DEFAULT_VHOST] = initializeVHost(DEFAULT_VHOST, options, b)
 
 	// Recover any additional vhosts that were persisted from previous runs
 	if names, err := persist.LoadAllVHosts(); err == nil {
@@ -108,7 +115,7 @@ func NewBroker(config *config.Config, rootCtx context.Context, rootCancel contex
 			if name == DEFAULT_VHOST {
 				continue
 			}
-			b.VHosts[name] = initializeVHost(name, options, b)
+			b.vhosts[name] = initializeVHost(name, options, b)
 			log.Info().Str("vhost", name).Msg("Recovered persisted vhost")
 		}
 	}
@@ -201,6 +208,7 @@ func (b *Broker) handshakeConfig() amqp.HandshakeConfig {
 		Locales:          []string{"en_US"},
 		SSL:              b.config.Ssl,
 		Tuning:           amqp.NewServerTuning(b.config.ChannelMax, b.config.FrameMax, b.config.HeartbeatIntervalMax),
+		LoopbackUsers:    b.config.LoopbackUsers,
 	}
 }
 
@@ -303,7 +311,7 @@ func (b *Broker) processRequest(conn net.Conn, newState *amqp.ChannelState) (any
 		return nil, nil
 	}
 	b.mu.Lock()
-	connInfo, exist := b.Connections[conn]
+	connInfo, exist := b.connInfos[conn]
 	b.mu.Unlock()
 	if !exist {
 		// connection terminated while processing the request
@@ -325,7 +333,7 @@ func (b *Broker) processRequest(conn net.Conn, newState *amqp.ChannelState) (any
 	}
 
 	// Get vhost after shutdown check to avoid nil pointer during cleanup
-	vh := b.VHosts[connInfo.VHostName]
+	vh := b.GetVHost(connInfo.VHostName)
 	if vh == nil {
 		log.Debug().Str("vhost", connInfo.VHostName).Msg("VHost not found or already cleaned up")
 		return nil, nil
@@ -380,14 +388,16 @@ func (b *Broker) processRequest(conn net.Conn, newState *amqp.ChannelState) (any
 // Must be called with b.mu unlocked.
 func (b *Broker) setConnectionClosingState(conn net.Conn) {
 	b.mu.Lock()
-	b.Connections[conn].ClosingConnection = true
+	if connInfo, ok := b.connInfos[conn]; ok {
+		connInfo.ClosingConnection = true
+	}
 	b.mu.Unlock()
 }
 
 func (b *Broker) getCurrentState(conn net.Conn, channel uint16) *amqp.ChannelState {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	state, ok := b.Connections[conn].Channels[channel]
+	state, ok := b.channelStateLocked(conn, channel)
 	if !ok {
 		log.Debug().Uint16("channel", channel).Msg("No channel found")
 		return nil
@@ -398,7 +408,7 @@ func (b *Broker) getCurrentState(conn net.Conn, channel uint16) *amqp.ChannelSta
 func (b *Broker) GetVHost(vhostName string) *vhost.VHost {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if vhost, ok := b.VHosts[vhostName]; ok {
+	if vhost, ok := b.vhosts[vhostName]; ok {
 		return vhost
 	}
 	return nil
@@ -407,8 +417,8 @@ func (b *Broker) GetVHost(vhostName string) *vhost.VHost {
 func (b *Broker) ListVHosts() []*vhost.VHost {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	vhosts := make([]*vhost.VHost, 0, len(b.VHosts))
-	for _, vh := range b.VHosts {
+	vhosts := make([]*vhost.VHost, 0, len(b.vhosts))
+	for _, vh := range b.vhosts {
 		vhosts = append(vhosts, vh)
 	}
 	return vhosts
@@ -420,7 +430,7 @@ func (b *Broker) CreateVHost(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, exists := b.VHosts[name]; exists {
+	if _, exists := b.vhosts[name]; exists {
 		return fmt.Errorf("vhost '%s' already exists", name)
 	}
 
@@ -433,11 +443,11 @@ func (b *Broker) CreateVHost(name string) error {
 		EnableQLL:       b.config.EnableQLL,
 	}
 	vh := initializeVHost(name, options, b)
-	b.VHosts[name] = vh
+	b.vhosts[name] = vh
 
 	if b.persist != nil {
 		if err := b.persist.SaveVHostMetadata(name); err != nil {
-			delete(b.VHosts, name)
+			delete(b.vhosts, name)
 			return fmt.Errorf("failed to persist vhost: %w", err)
 		}
 	}
@@ -456,18 +466,18 @@ func (b *Broker) DeleteVHost(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, exists := b.VHosts[name]; !exists {
+	if _, exists := b.vhosts[name]; !exists {
 		return fmt.Errorf("vhost '%s' not found", name)
 	}
 
 	// Reject if there are active connections on this vhost
-	for _, connInfo := range b.Connections {
+	for _, connInfo := range b.connInfos {
 		if connInfo.VHostName == name {
 			return fmt.Errorf("vhost '%s' has active connections", name)
 		}
 	}
 
-	delete(b.VHosts, name)
+	delete(b.vhosts, name)
 
 	if b.persist != nil {
 		if err := b.persist.DeleteVHostMetadata(name); err != nil {
@@ -482,17 +492,28 @@ func (b *Broker) DeleteVHost(name string) error {
 func (b *Broker) ListConnections() []amqp.ConnectionInfo {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	connections := make([]amqp.ConnectionInfo, 0, len(b.Connections))
-	for _, c := range b.Connections {
-		connections = append(connections, *c)
+	connections := make([]amqp.ConnectionInfo, 0, len(b.connInfos))
+	for _, c := range b.connInfos {
+		connections = append(connections, snapshotConnInfo(c))
 	}
 	return connections
+}
+
+// snapshotConnInfo copies connInfo, including its Channels map, so the copy
+// can be read after b.mu is released. The caller must hold b.mu.
+func snapshotConnInfo(connInfo *amqp.ConnectionInfo) amqp.ConnectionInfo {
+	snapshot := *connInfo
+	snapshot.Channels = make(map[uint16]*amqp.ChannelState, len(connInfo.Channels))
+	for num, ch := range connInfo.Channels {
+		snapshot.Channels[num] = ch
+	}
+	return snapshot
 }
 
 // listConnectionsPerVhosts returns a map of vhost names to their respective connections.
 func (b *Broker) listConnectionsPerVhostsUnlocked() map[string][]amqp.ConnectionInfo {
 	vhostConnections := make(map[string][]amqp.ConnectionInfo)
-	for _, c := range b.Connections {
+	for _, c := range b.connInfos {
 		vhostName := c.VHostName
 		vhostConnections[vhostName] = append(vhostConnections[vhostName], *c)
 	}
@@ -502,9 +523,10 @@ func (b *Broker) listConnectionsPerVhostsUnlocked() map[string][]amqp.Connection
 func (b *Broker) GetConnectionByName(name string) (*amqp.ConnectionInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, c := range b.Connections {
-		if string(b.connToID[c.Client.Conn]) == name {
-			return c, nil
+	for conn, c := range b.connInfos {
+		if connID, ok := b.GetConnectionID(conn); ok && string(connID) == name {
+			snapshot := snapshotConnInfo(c)
+			return &snapshot, nil
 		}
 	}
 	return nil, fmt.Errorf("connection '%s' not found", name)
@@ -513,8 +535,8 @@ func (b *Broker) GetConnectionByName(name string) (*amqp.ConnectionInfo, error) 
 func (b *Broker) Shutdown() {
 	// Collect under the lock: closing triggers cleanups that modify the map.
 	b.mu.Lock()
-	clients := make([]*amqp.AmqpClient, 0, len(b.Connections))
-	for _, connInfo := range b.Connections {
+	clients := make([]*amqp.AmqpClient, 0, len(b.connInfos))
+	for _, connInfo := range b.connInfos {
 		clients = append(clients, connInfo.Client)
 	}
 	b.mu.Unlock()
@@ -528,9 +550,9 @@ func (b *Broker) ListVhostDetails() ([]models.VHostDTO, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	// create a map with vhost name to channel info
-	vhosts := make([]models.VHostDTO, 0, len(b.VHosts))
+	vhosts := make([]models.VHostDTO, 0, len(b.vhosts))
 	// channelsPerVhost := make(map[string]models.ChannelInfo)
-	for _, vh := range b.VHosts {
+	for _, vh := range b.vhosts {
 		VHostDTO, err := b.CreateVhostDto(vh)
 		if err != nil {
 			return nil, err
@@ -576,43 +598,65 @@ func (b *Broker) CreateVhostDto(vh *vhost.VHost) (models.VHostDTO, error) {
 func (b *Broker) ListChannels(vhost string) ([]models.ChannelInfo, error) {
 	filterSet := vhost != ""
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	channels := make([]models.ChannelInfo, 0, len(b.Connections))
-	if filterSet {
-		for conn, c := range b.Connections {
-			if c.VHostName == vhost {
-				channels = append(channels, b.listChannelsByConnection(c, conn)...)
-			}
-		}
-	} else { // filter not set
-		for conn, c := range b.Connections {
-			channels = append(channels, b.listChannelsByConnection(c, conn)...)
+	refs := make([]channelRef, 0, len(b.connInfos))
+	for conn, c := range b.connInfos {
+		if !filterSet || c.VHostName == vhost {
+			refs = append(refs, b.channelRefsLocked(c, conn)...)
 		}
 	}
+	b.mu.Unlock()
 
-	return channels, nil
+	return channelInfos(refs), nil
 }
 
 func (b *Broker) ListConnectionChannels(connName string) ([]models.ChannelInfo, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for conn, c := range b.Connections {
-		if connName == string(b.connToID[conn]) {
-			return b.listChannelsByConnection(c, conn), nil
+	for conn, c := range b.connInfos {
+		if connID, ok := b.GetConnectionID(conn); ok && string(connID) == connName {
+			refs := b.channelRefsLocked(c, conn)
+			b.mu.Unlock()
+			return channelInfos(refs), nil
 		}
 	}
+	b.mu.Unlock()
 	return nil, fmt.Errorf("connection '%s' not found", connName)
 }
 
-// ListConnectionChannels returns all channels for a specific connection.
-func (b *Broker) listChannelsByConnection(connInfo *amqp.ConnectionInfo, conn net.Conn) []models.ChannelInfo {
-	channels := make([]models.ChannelInfo, 0, len(b.Connections))
-	vhostName := connInfo.VHostName
-	vh := b.VHosts[vhostName]
+// channelRef is what createChannelInfo needs about one channel, copied under
+// b.mu. The channel infos are built after b.mu is released: building them
+// takes vhost and transaction locks, and a transaction commit takes b.mu while
+// it holds its transaction's lock.
+type channelRef struct {
+	connID vhost.ConnectionID
+	num    uint16
+	vh     *vhost.VHost
+	state  *amqp.ChannelState // a copy, safe to read without b.mu
+	user   string
+}
+
+// channelRefsLocked returns refs for all channels of a connection. The caller
+// must hold b.mu.
+func (b *Broker) channelRefsLocked(connInfo *amqp.ConnectionInfo, conn net.Conn) []channelRef {
+	refs := make([]channelRef, 0, len(connInfo.Channels))
+	vh := b.vhosts[connInfo.VHostName]
 	user := connInfo.Client.Config.Username
-	connID := b.connToID[conn]
+	connID, _ := b.GetConnectionID(conn)
 	for channelNum, ch := range connInfo.Channels {
-		channelInfo, err := b.createChannelInfo(connID, channelNum, vh, ch, user)
+		ref := channelRef{connID: connID, num: channelNum, vh: vh, user: user}
+		if ch != nil {
+			state := *ch
+			ref.state = &state
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+// channelInfos builds the channel infos for refs. Call it without b.mu.
+func channelInfos(refs []channelRef) []models.ChannelInfo {
+	channels := make([]models.ChannelInfo, 0, len(refs))
+	for _, ref := range refs {
+		channelInfo, err := createChannelInfo(ref.connID, ref.num, ref.vh, ref.state, ref.user)
 		if err != nil {
 			log.Debug().Err(err).Msg("Failed to create channel summary")
 			continue
@@ -623,16 +667,29 @@ func (b *Broker) listChannelsByConnection(connInfo *amqp.ConnectionInfo, conn ne
 }
 
 func (b *Broker) CreateChannelInfo(connID vhost.ConnectionID, channelNum uint16, vh *vhost.VHost) (models.ChannelInfo, error) {
+	conn, ok := b.connByID(connID)
+	if !ok {
+		return models.ChannelInfo{}, fmt.Errorf("connection '%s' not found", connID)
+	}
 	b.mu.Lock()
-	connInfo := b.Connections[b.connections[connID]]
-	ch := connInfo.Channels[channelNum]
+	connInfo, ok := b.connInfos[conn]
+	if !ok {
+		b.mu.Unlock()
+		return models.ChannelInfo{}, fmt.Errorf("connection '%s' not found", connID)
+	}
+	var state *amqp.ChannelState
+	if ch := connInfo.Channels[channelNum]; ch != nil {
+		copied := *ch
+		state = &copied
+	}
 	user := connInfo.Client.Config.Username
 	b.mu.Unlock()
-	return b.createChannelInfo(connID, channelNum, vh, ch, user)
+	return createChannelInfo(connID, channelNum, vh, state, user)
 }
 
-// createChannelInfo creates a summary of the channel state.
-func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, vh *vhost.VHost, ch *amqp.ChannelState, user string) (models.ChannelInfo, error) {
+// createChannelInfo creates a summary of the channel state. Call it without
+// b.mu (see channelRef).
+func createChannelInfo(connID vhost.ConnectionID, channelNum uint16, vh *vhost.VHost, ch *amqp.ChannelState, user string) (models.ChannelInfo, error) {
 	if connID == "" {
 		return models.ChannelInfo{}, fmt.Errorf("connection ID is empty")
 	}
@@ -650,17 +707,7 @@ func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, v
 		Channel:      channelNum,
 	}
 
-	unackedCount := 0
-	prefetchCount := uint16(0)
-	deliveryState := vh.ChannelDeliveries[channelKey]
-	if deliveryState != nil {
-		if len(deliveryState.UnackedByTag) > 0 {
-			unackedCount = len(deliveryState.UnackedByTag)
-		}
-		if deliveryState.NextPrefetchCount > 0 {
-			prefetchCount = deliveryState.NextPrefetchCount
-		}
-	}
+	delivery, hasDelivery := vh.GetChannelDeliveryStats(channelKey)
 	inTransaction := false
 	txState := vh.GetTransactionState(channelNum, connID)
 	if txState != nil {
@@ -668,7 +715,7 @@ func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, v
 		inTransaction = txState.InTransaction
 		txState.Unlock()
 	}
-	channelStateLabel := getChannelState(deliveryState, ch)
+	channelStateLabel := getChannelState(delivery, hasDelivery, ch)
 
 	channelInfo := models.ChannelInfo{
 		VHost:            vh.Name,
@@ -677,8 +724,8 @@ func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, v
 		User:             user,
 		State:            channelStateLabel,
 		UnconfirmedCount: 0, // Relevant only when publisher confirms mode is enabled. Not tracked yet.
-		UnackedCount:     unackedCount,
-		PrefetchCount:    prefetchCount,
+		UnackedCount:     delivery.UnackedCount,
+		PrefetchCount:    delivery.PrefetchCount,
 		InTransaction:    inTransaction,
 		ConfirmMode:      false, // Not implemented yet
 	}
@@ -686,11 +733,11 @@ func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, v
 }
 
 // getChannelState returns the state of the channel as a string ("running" or "flow").
-func getChannelState(deliveryState *vhost.ChannelDeliveryState, channelState *amqp.ChannelState) string {
+func getChannelState(delivery vhost.ChannelDeliveryStats, hasDelivery bool, channelState *amqp.ChannelState) string {
 	if channelState != nil && channelState.ClosingChannel {
 		return "closing"
 	}
-	if deliveryState != nil && !deliveryState.FlowActive {
+	if hasDelivery && !delivery.FlowActive {
 		return "flow"
 	}
 	return "running"
@@ -715,7 +762,7 @@ func (b *Broker) GetConnectionID(conn net.Conn) (vhost.ConnectionID, bool) {
 func (b *Broker) negotiatedFrameMax(conn net.Conn) uint32 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	connInfo, ok := b.Connections[conn]
+	connInfo, ok := b.connInfos[conn]
 	if !ok || connInfo.Client == nil {
 		return 0
 	}
@@ -727,7 +774,7 @@ func (b *Broker) negotiatedFrameMax(conn net.Conn) uint32 {
 func (b *Broker) negotiatedChannelMax(conn net.Conn) uint16 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	connInfo, ok := b.Connections[conn]
+	connInfo, ok := b.connInfos[conn]
 	if !ok || connInfo.Client == nil {
 		return 0
 	}
@@ -866,7 +913,7 @@ func (b *Broker) GetOverviewConnStats() models.OverviewConnectionStats {
 	defer b.mu.Unlock()
 
 	var stats models.OverviewConnectionStats
-	for _, connInfo := range b.Connections {
+	for _, connInfo := range b.connInfos {
 		stats.Total++
 		if connInfo.ClosingConnection {
 			stats.Closing++
@@ -881,7 +928,7 @@ func (b *Broker) GetOverviewConnStats() models.OverviewConnectionStats {
 		ConnectionID: vhost.MANAGEMENT_CONNECTION_ID,
 		Channel:      0,
 	}
-	for _, vh := range b.VHosts {
+	for _, vh := range b.vhosts {
 		ch := vh.GetChannelDelivery(channelKey)
 		if ch != nil {
 			stats.Total++   // each management connection has one channel (0) on each vhost
@@ -918,7 +965,7 @@ func (b *Broker) GetObjectTotalsOverview() models.OverviewObjectTotals {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	vhostConnections := b.listConnectionsPerVhostsUnlocked()
-	for _, vh := range b.VHosts {
+	for _, vh := range b.vhosts {
 		totals.Connections += len(vhostConnections[vh.Name])
 		totals.Channels += b.getChannelCountByVHostUnlocked(vh)
 		totals.Exchanges += len(vh.GetAllExchanges())
@@ -930,7 +977,7 @@ func (b *Broker) GetObjectTotalsOverview() models.OverviewObjectTotals {
 
 func (b *Broker) getChannelCountByVHostUnlocked(vh *vhost.VHost) int {
 	count := 0
-	for _, connInfo := range b.Connections {
+	for _, connInfo := range b.connInfos {
 		if connInfo.VHostName == vh.Name {
 			count += len(connInfo.Channels)
 		}
@@ -941,15 +988,17 @@ func (b *Broker) getChannelCountByVHostUnlocked(vh *vhost.VHost) int {
 func (b *Broker) CloseConnection(name string, reason string) error {
 	b.mu.Lock()
 	var targetConn net.Conn
-	for conn := range b.Connections {
-		if string(b.connToID[conn]) == name {
+	closing := false
+	for conn, connInfo := range b.connInfos {
+		if connID, ok := b.GetConnectionID(conn); ok && string(connID) == name {
 			targetConn = conn
+			closing = connInfo.ClosingConnection
 			break
 		}
 	}
 	b.mu.Unlock()
 
-	if targetConn == nil || b.Connections[targetConn].ClosingConnection {
+	if targetConn == nil || closing {
 		return nil //nothing to do (idempotent)
 	}
 

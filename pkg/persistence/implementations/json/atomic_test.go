@@ -112,7 +112,10 @@ func TestCrashBeforeRenameKeepsOldFile(t *testing.T) {
 // leaves everything else alone.
 func TestInitializeRemovesStrayTempFiles(t *testing.T) {
 	dir := t.TempDir()
-	vh := filepath.Join(dir, "vhosts", "%2F")
+	if err := os.WriteFile(filepath.Join(dir, layoutFileName), []byte(`{"layout": 2}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	vh := filepath.Join(dir, "vhosts", encodeName("/"))
 	stray := []string{
 		filepath.Join(vh, "queues", "q.json.tmp"),
 		filepath.Join(vh, "exchanges", "ex.json.tmp"),

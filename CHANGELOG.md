@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **The JSON persistence layout changed, and a data dir with durable entities from v0.21 or
+  earlier is refused.** Queue, exchange and vhost names are now encoded into file names
+  instead of being used as paths (#234). On startup the broker checks for
+  `<OTTERMQ_DATA_DIR>/persistence.json`. If it is missing and `vhosts/` isn't empty, the data
+  dir is from the old layout and the broker exits with an error rather than misreading it. That
+  includes vhosts with no durable entities, whose old directory names can decode as other vhosts.
+  To upgrade, back up and remove `<OTTERMQ_DATA_DIR>/vhosts/`. Vhosts, durable queues, exchanges,
+  bindings and persistent messages in it are lost; users and permissions (`ottermq.db`) are kept.
+  Alternatively, keep running v0.21.x until you can recreate them. A data dir with no `vhosts/`
+  directory, or an empty one, upgrades without any action.
+- **Web API tokens issued before the upgrade stop working.** `OTTERMQ_JWT_SECRET` no longer
+  defaults to `secret`: if it is unset, a random key is generated on first start and kept in
+  `<OTTERMQ_DATA_DIR>/jwt.key`, so log in again after upgrading. Back that file up with the data
+  dir if tokens should survive a restore (#203).
+- **A weak `OTTERMQ_JWT_SECRET` stops the broker at startup.** `secret` (which the old
+  `docker.env` and `example.env` set explicitly) or anything shorter than 32 bytes is refused.
+  Remove the setting to use a generated key, or set at least 32 random bytes (e.g.
+  `openssl rand -hex 32`). `OTTERMQ_INSECURE_DEV=true` accepts a weak key with a warning, for local
+  development only (#203).
+- **`guest` can only connect from localhost**, over AMQP (`connection.close` 403 ACCESS_REFUSED)
+  and on `/api/login` (401), as in RabbitMQ. Clients on other hosts, including the host side of a
+  Docker container, need their own user: set `OTTERMQ_USERNAME`/`OTTERMQ_PASSWORD` before the first
+  start, or add one with `ottermqadmin users create`. `OTTERMQ_LOOPBACK_USERS` lists the restricted users
+  (default `guest`); set it empty to restore the old behaviour. `docker-compose.yml` now
+  publishes its ports on `127.0.0.1` only (#203).
+
+### Security
+
+- Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
+  2.52.15 (GO-2026-4543, GO-2025-3845, GO-2025-3706), golang-jwt 5.3.1 (GO-2025-3553), plus
+  fasthttp 1.76.0 and golang.org/x/crypto 0.58.0. `govulncheck ./...` now reports none (#207).
+- A default install could be taken over by anyone who reached its ports: the bootstrap
+  administrator `guest`/`guest` was accepted from any address, and web API tokens were signed with
+  the key `secret`, so an admin token could be forged without logging in. The signing key is now
+  generated per install, weak configured keys are refused, and `guest` is loopback-only (#203).
+
+### Changed
+
+- Building OtterMQ now needs Go 1.26 or later (required by the upgraded dependencies). `go.mod`
+  pins the toolchain to Go 1.27.3, which CI uses, and the Docker image builds with
+  `golang:1.27-alpine` instead of an unpinned `golang:alpine` (#207).
+
 ### Fixed
 
 - Getting messages through the management API now sizes its result by the number of messages in
@@ -16,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request.
 - A panic in a web API handler now fails only that request with a 500 and is logged with its
   stack trace. Before, it ended the whole process, taking the AMQP broker down with the web API.
+  The Prometheus metrics server recovers the same way (#207).
+- Publishing while the management API lists channels or connections no longer risks aborting the
+  broker with `fatal error: concurrent map read and map write`, which can't be recovered. Every
+  broker map is now read and written under its lock, and a connection that disappears while one of
+  its requests is in flight is treated as gone instead of panicking (#216).
+- Queue, exchange and vhost names can no longer reach outside the data dir. Names such as `..`,
+  `../x` or `a/b` used to become file paths: an authenticated client could create or delete
+  `.json` files elsewhere, and deleting a vhost named `..` removed the whole data dir, users
+  included. Names containing `/` now also persist and recover correctly (#234).
 
 ## [v0.21.1]
 

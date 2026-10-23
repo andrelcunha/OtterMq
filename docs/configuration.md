@@ -84,7 +84,9 @@ Control the built-in metrics collection system:
 |----------|---------|-------------|
 | `OTTERMQ_USERNAME` | `guest` | Default admin username (first startup only) |
 | `OTTERMQ_PASSWORD` | `guest` | Default admin password (first startup only) |
-| `OTTERMQ_JWT_SECRET` | Auto-generated | Secret key for JWT token signing (set in production!) |
+| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from a loopback address, over AMQP (`connection.close` 403) and `/api/login` (401). Set it empty to restrict nobody |
+| `OTTERMQ_JWT_SECRET` | Auto-generated | Secret key for JWT token signing, at least 32 bytes. Unset, a random key is generated on first start and kept in `<data dir>/jwt.key` (mode 0600). The old default `secret`, or a shorter key, stops the broker at startup |
+| `OTTERMQ_INSECURE_DEV` | `false` | Accept a weak `OTTERMQ_JWT_SECRET`, with a warning at startup. Local development only |
 
 ## Display & Logging
 

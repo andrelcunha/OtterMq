@@ -9,9 +9,10 @@ services:
     env_file:
       - docker.env # load all variables into container environment
     ports:
-      - "${OTTERMQ_DOCKER_WEB_PORT}:3000" # Web UI
-      - "${OTTERMQ_DOCKER_BROKER_PORT}:5672" # AMQP
-      - "${OTTERMQ_DOCKER_PROMETHEUS_PORT}:9090" # Prometheus metrics
+      # Published on the host's loopback only; change 127.0.0.1 to expose them.
+      - "127.0.0.1:${OTTERMQ_DOCKER_WEB_PORT}:3000" # Web UI
+      - "127.0.0.1:${OTTERMQ_DOCKER_BROKER_PORT}:5672" # AMQP
+      - "127.0.0.1:${OTTERMQ_DOCKER_PROMETHEUS_PORT}:9090" # Prometheus metrics
     volumes:
       - data:/app/data
     environment:

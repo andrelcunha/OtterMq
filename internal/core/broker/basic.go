@@ -156,28 +156,24 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 		return nil, fmt.Errorf("channel not found")
 	}
 	if currentState.MethodFrame != request { // request is "newState.MethodFrame"
-		b.mu.Lock()
-		b.Connections[conn].Channels[channel].MethodFrame = request
-		b.mu.Unlock()
+		b.updateChannelState(conn, channel, func(st *amqp.ChannelState) { st.MethodFrame = request })
 		log.Trace().Interface("state", b.getCurrentState(conn, channel)).Msg("Current state after update method")
 		return nil, nil
 	}
 	// if the class and method are not the same as the current state,
 	// it means that it stated the new publish request
 	if currentState.HeaderFrame == nil && newState.HeaderFrame != nil {
-		b.mu.Lock()
-		b.Connections[conn].Channels[channel].HeaderFrame = newState.HeaderFrame
-		b.Connections[conn].Channels[channel].BodySize = newState.HeaderFrame.BodySize
-		b.mu.Unlock()
+		b.updateChannelState(conn, channel, func(st *amqp.ChannelState) {
+			st.HeaderFrame = newState.HeaderFrame
+			st.BodySize = newState.HeaderFrame.BodySize
+		})
 		log.Trace().Interface("state", b.getCurrentState(conn, channel)).Msg("Current state after update header")
 		return nil, nil
 	}
 	if currentState.Body == nil && newState.Body != nil {
 		log.Trace().Int("body_len", len(newState.Body)).Uint64("expected", currentState.BodySize).Msg("Updating body")
 		// Append the new body to the current body
-		b.mu.Lock()
-		b.Connections[conn].Channels[channel].Body = newState.Body
-		b.mu.Unlock()
+		b.updateChannelState(conn, channel, func(st *amqp.ChannelState) { st.Body = newState.Body })
 	}
 	log.Trace().Interface("state", currentState).Msg("Current state after all")
 	if currentState.MethodFrame.Content != nil && currentState.HeaderFrame != nil && currentState.BodySize > 0 && currentState.Body != nil {
@@ -226,7 +222,7 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 		a, err, ok := b.bufferPublishInTransaction(vh, channel, conn, exchange, routingKey, amqpMsg, mandatory)
 		if ok {
 			// Reset channel state after buffering in transaction
-			b.Connections[conn].Channels[channel] = &amqp.ChannelState{}
+			b.resetChannelState(conn, channel)
 			return a, err
 		}
 
@@ -234,14 +230,14 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 			if mandatory {
 				// Return message to the publisher
 				log.Debug().Str("exchange", exchange).Str("routing_key", routingKey).Msg("No route for message, returned to publisher")
-				b.Connections[conn].Channels[channel] = &amqp.ChannelState{}
+				b.resetChannelState(conn, channel)
 				return b.BasicReturn(conn, channel, exchange, routingKey, amqpMsg)
 			}
 			// No routing and not mandatory - silently drop the message
-			user := b.Connections[conn].Client.Config.Username
+			user := b.connUser(conn)
 			b.collector.RecordChannelUnroutable(conn.RemoteAddr().String(), vh.Name, user, channel)
 			log.Debug().Str("exchange", exchange).Str("routing_key", routingKey).Msg("No route for message, silently dropped (not mandatory)")
-			b.Connections[conn].Channels[channel] = &amqp.ChannelState{}
+			b.resetChannelState(conn, channel)
 			return nil, nil
 		}
 		msgID := vhost.GenerateMessageId()
@@ -250,8 +246,8 @@ func (b *Broker) basicPublishHandler(newState *amqp.ChannelState, conn net.Conn,
 		if err == nil {
 			// routed successfully
 			log.Trace().Str("exchange", exchange).Str("routing_key", routingKey).Str("body", string(body)).Msg("Published message")
-			b.Connections[conn].Channels[channel] = &amqp.ChannelState{}
-			user := b.Connections[conn].Client.Config.Username
+			b.resetChannelState(conn, channel)
+			user := b.connUser(conn)
 			b.collector.RecordChannelPublish(conn.RemoteAddr().String(), vh.Name, user, channel)
 		}
 
@@ -432,7 +428,7 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 		return nil, err
 	}
 	// Record the consumer registration in metrics
-	user := b.Connections[conn].Client.Config.Username
+	user := b.connUser(conn)
 	connName := conn.RemoteAddr().String()
 	b.collector.RecordChannelConsumer(connName, vh.Name, user, request.Channel)
 

@@ -155,15 +155,17 @@ Available configuration options:
 |---------------------|---------|-------------|
 | `OTTERMQ_BROKER_PORT` | `5672` | AMQP broker port |
 | `OTTERMQ_BROKER_HOST` | `` | Broker bind address (empty = all interfaces) |
-| `OTTERMQ_USERNAME` | `guest` | Default username for authentication |
-| `OTTERMQ_PASSWORD` | `guest` | Default password for authentication |
+| `OTTERMQ_USERNAME` | `guest` | Bootstrap admin user, created on first start |
+| `OTTERMQ_PASSWORD` | `guest` | Password of the bootstrap admin user |
+| `OTTERMQ_LOOPBACK_USERS` | `guest` | Comma-separated users that may only connect from localhost (AMQP and web API); set it empty to restrict nobody |
 | `OTTERMQ_HEARTBEAT_INTERVAL` | `60` | Heartbeat interval in seconds |
 | `OTTERMQ_CHANNEL_MAX` | `2048` | Maximum number of channels |
 | `OTTERMQ_FRAME_MAX` | `131072` | Maximum frame size in bytes |
 | `OTTERMQ_SSL` | `false` | Enable SSL/TLS |
 | `OTTERMQ_QUEUE_BUFFER_SIZE` | `100000` | Queue message buffer size |
 | `OTTERMQ_WEB_PORT` | `3000` | Web management UI port |
-| `OTTERMQ_JWT_SECRET` | `secret` | JWT secret key for authentication |
+| `OTTERMQ_JWT_SECRET` | generated | Key that signs web API tokens, at least 32 bytes. Unset, a random key is generated on first start and kept in `<data dir>/jwt.key` |
+| `OTTERMQ_INSECURE_DEV` | `false` | Accept a weak `OTTERMQ_JWT_SECRET` (such as `secret`), for local development only |
 
 ### Example Configuration
 
@@ -175,7 +177,8 @@ OTTERMQ_WEB_PORT=8080
 OTTERMQ_USERNAME=admin
 OTTERMQ_PASSWORD=secure_password
 OTTERMQ_QUEUE_BUFFER_SIZE=200000
-OTTERMQ_JWT_SECRET=my-secret-key
+# Optional; generated in the data dir if unset. At least 32 bytes, e.g. `openssl rand -hex 32`.
+# OTTERMQ_JWT_SECRET=
 ```
 
 Or use environment variables directly:

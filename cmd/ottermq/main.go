@@ -42,6 +42,17 @@ func main() {
 
 	dataDir := getOrCreateDataDir(cfg.DataDir)
 
+	// Resolve the web API signing key before anything listens, so a weak
+	// configured secret stops the broker instead of being used.
+	jwtSecret, weak, err := config.ResolveJwtSecret(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Invalid JWT secret")
+	}
+	if weak {
+		log.Warn().Msg("OTTERMQ_INSECURE_DEV=true: using a weak OTTERMQ_JWT_SECRET. Anyone who guesses it can forge admin tokens; never use this outside local development")
+	}
+	cfg.JwtSecret = jwtSecret
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize metrics collector before broker setup to ensure vhosts receive it.
@@ -51,7 +62,7 @@ func main() {
 
 	//Get or create the user in the database
 	user, err := setupUserDatabase(dataDir, cfg)
-	b.VHosts["/"].Users[user.Username] = &user
+	b.GetVHost("/").Users[user.Username] = &user
 
 	var promServer *prometheus.Server = nil
 	if cfg.EnableMetrics && mtrx != nil {
@@ -177,6 +188,7 @@ func initializeWebServer(b *broker.Broker, cfg *config.Config, err error) (inter
 			Username:      cfg.Username,
 			Password:      cfg.Password,
 			JwtKey:        cfg.JwtSecret,
+			LoopbackUsers: cfg.LoopbackUsers,
 			WebServerPort: cfg.WebPort,
 			EnableUI:      cfg.EnableUI,
 			EnableSwagger: cfg.EnableSwagger,
