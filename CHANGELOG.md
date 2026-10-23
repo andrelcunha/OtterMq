@@ -76,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Unbinding a durable queue from a durable exchange was never saved, so the binding came back after
+  a restart and the queue again received messages for the key it was unbound from. Bindings were
+  also saved and recovered with their exchange's arguments instead of their own. They are now saved
+  with their own arguments, an unbind removes them from disk, and no arguments and an empty
+  arguments table name the same binding (#298).
 - AMQP login rejected passwords and usernames containing spaces, and clients that send a PLAIN
   authorization identity equal to the username: the PLAIN response was split on spaces instead of
   on its NUL separators. It is now parsed as RFC 4616 `authzid NUL authcid NUL passwd`; an

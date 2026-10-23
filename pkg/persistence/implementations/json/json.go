@@ -35,10 +35,10 @@ func NewJsonPersistence(config *persistence.Config) (*JsonPersistence, error) {
 }
 
 // equalArgs compares two argument maps by their JSON encoding to avoid type
-// discrepancies (e.g., int vs float64) after JSON round-trips.
+// discrepancies (e.g., int vs float64) after JSON round-trips. nil and an
+// empty table both mean "no arguments", and are equal.
 func equalArgs(a, b map[string]any) bool {
-	// Quick path
-	if a == nil && b == nil {
+	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
 	ab, err1 := json.Marshal(a)
