@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.21.1]
+
+> **Not production-ready.** The notice for v0.21.0 still applies: stop-ship issues remain open (see
+> the [Phase 0 milestone](https://github.com/ottermq/ottermq/milestone/8)). This release fixes two
+> memory-exhaustion issues reachable before authentication; upgrade if your AMQP port is reachable
+> by clients you don't trust.
+
+### Security
+
+- The AMQP field-table decoder allocated a field's declared length before checking that the frame
+  held that many bytes, so a client could make the broker allocate gigabytes without
+  authenticating ([GHSA-8gjf-3rj4-m572](https://github.com/ottermq/ottermq/security/advisories/GHSA-8gjf-3rj4-m572)).
+- Nested field tables and arrays were copied at every nesting level, so one frame could make the
+  broker hold memory growing with the square of its depth, also without authenticating
+  ([GHSA-fr4j-xwwq-g84r](https://github.com/ottermq/ottermq/security/advisories/GHSA-fr4j-xwwq-g84r)).
+
 ### Fixed
 
 - Field values whose declared length exceeds the frame are now rejected before any memory is
@@ -623,7 +639,8 @@ For releases prior to v0.7.1, please refer to [GitHub Releases](https://github.c
 
 ---
 
-[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/ottermq/ottermq/compare/v0.21.1...HEAD
+[v0.21.1]: https://github.com/ottermq/ottermq/releases/tag/v0.21.1
 [v0.21.0]: https://github.com/ottermq/ottermq/releases/tag/v0.21.0
 [v0.20.0]: https://github.com/ottermq/ottermq/releases/tag/v0.20.0
 [v0.19.3]: https://github.com/ottermq/ottermq/releases/tag/v0.19.3
