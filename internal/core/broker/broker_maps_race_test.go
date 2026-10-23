@@ -94,3 +94,51 @@ func TestBroker_HelpersTolerateRemovedConnection(t *testing.T) {
 		})
 	}
 }
+
+// Committing a transaction that holds an unroutable publish runs while the
+// management API lists channels. The commit must not take b.mu while holding
+// the transaction lock, because listing takes them in the other order.
+func TestBroker_TxCommitWhileListingDoesNotDeadlock(t *testing.T) {
+	b, _, addr := startTestBroker(t, nil, nil)
+	conn, err := amqp091.Dial("amqp://guest:guest@" + addr + "/")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatalf("channel: %v", err)
+	}
+	if err := ch.Tx(); err != nil {
+		t.Fatalf("tx.select: %v", err)
+	}
+
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ctx.Err() == nil {
+				_, _ = b.ListChannels("")
+			}
+		}()
+		for ctx.Err() == nil {
+			_ = ch.Publish("", "no-such-queue", false, false, amqp091.Publishing{Body: []byte("dropped")})
+			if err := ch.TxCommit(); err != nil {
+				t.Errorf("tx.commit: %v", err)
+				break
+			}
+		}
+		wg.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("tx.commit and ListChannels deadlocked")
+	}
+}

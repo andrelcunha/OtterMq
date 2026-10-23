@@ -35,8 +35,10 @@ const (
 // Locks: mu guards vhosts, connInfos and every ConnectionInfo's Channels
 // map. connectionsMu guards connections and connToID. Lock order: mu, then a
 // vhost's locks (vh.mu, then a channel's delivery state), then connectionsMu,
-// which is always taken last. Go through the accessors in conn_state.go
-// rather than indexing the maps directly.
+// which is always taken last. A transaction commit holds its transaction's
+// lock while it takes mu, so never take a transaction's lock under mu. Go
+// through the accessors in conn_state.go rather than indexing the maps
+// directly.
 type Broker struct {
 	vhosts       map[string]*vhost.VHost
 	config       *config.Config                    `json:"-"`
@@ -595,44 +597,65 @@ func (b *Broker) CreateVhostDto(vh *vhost.VHost) (models.VHostDTO, error) {
 func (b *Broker) ListChannels(vhost string) ([]models.ChannelInfo, error) {
 	filterSet := vhost != ""
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	channels := make([]models.ChannelInfo, 0, len(b.connInfos))
-	if filterSet {
-		for conn, c := range b.connInfos {
-			if c.VHostName == vhost {
-				channels = append(channels, b.listChannelsByConnection(c, conn)...)
-			}
-		}
-	} else { // filter not set
-		for conn, c := range b.connInfos {
-			channels = append(channels, b.listChannelsByConnection(c, conn)...)
+	refs := make([]channelRef, 0, len(b.connInfos))
+	for conn, c := range b.connInfos {
+		if !filterSet || c.VHostName == vhost {
+			refs = append(refs, b.channelRefsLocked(c, conn)...)
 		}
 	}
+	b.mu.Unlock()
 
-	return channels, nil
+	return channelInfos(refs), nil
 }
 
 func (b *Broker) ListConnectionChannels(connName string) ([]models.ChannelInfo, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	for conn, c := range b.connInfos {
 		if connID, ok := b.GetConnectionID(conn); ok && string(connID) == connName {
-			return b.listChannelsByConnection(c, conn), nil
+			refs := b.channelRefsLocked(c, conn)
+			b.mu.Unlock()
+			return channelInfos(refs), nil
 		}
 	}
+	b.mu.Unlock()
 	return nil, fmt.Errorf("connection '%s' not found", connName)
 }
 
-// listChannelsByConnection returns all channels for a specific connection.
-// The caller must hold b.mu.
-func (b *Broker) listChannelsByConnection(connInfo *amqp.ConnectionInfo, conn net.Conn) []models.ChannelInfo {
-	channels := make([]models.ChannelInfo, 0, len(connInfo.Channels))
-	vhostName := connInfo.VHostName
-	vh := b.vhosts[vhostName]
+// channelRef is what createChannelInfo needs about one channel, copied under
+// b.mu. The channel infos are built after b.mu is released: building them
+// takes vhost and transaction locks, and a transaction commit takes b.mu while
+// it holds its transaction's lock.
+type channelRef struct {
+	connID vhost.ConnectionID
+	num    uint16
+	vh     *vhost.VHost
+	state  *amqp.ChannelState // a copy, safe to read without b.mu
+	user   string
+}
+
+// channelRefsLocked returns refs for all channels of a connection. The caller
+// must hold b.mu.
+func (b *Broker) channelRefsLocked(connInfo *amqp.ConnectionInfo, conn net.Conn) []channelRef {
+	refs := make([]channelRef, 0, len(connInfo.Channels))
+	vh := b.vhosts[connInfo.VHostName]
 	user := connInfo.Client.Config.Username
 	connID, _ := b.GetConnectionID(conn)
 	for channelNum, ch := range connInfo.Channels {
-		channelInfo, err := b.createChannelInfo(connID, channelNum, vh, ch, user)
+		ref := channelRef{connID: connID, num: channelNum, vh: vh, user: user}
+		if ch != nil {
+			state := *ch
+			ref.state = &state
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+// channelInfos builds the channel infos for refs. Call it without b.mu.
+func channelInfos(refs []channelRef) []models.ChannelInfo {
+	channels := make([]models.ChannelInfo, 0, len(refs))
+	for _, ref := range refs {
+		channelInfo, err := createChannelInfo(ref.connID, ref.num, ref.vh, ref.state, ref.user)
 		if err != nil {
 			log.Debug().Err(err).Msg("Failed to create channel summary")
 			continue
@@ -648,18 +671,24 @@ func (b *Broker) CreateChannelInfo(connID vhost.ConnectionID, channelNum uint16,
 		return models.ChannelInfo{}, fmt.Errorf("connection '%s' not found", connID)
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	connInfo, ok := b.connInfos[conn]
 	if !ok {
+		b.mu.Unlock()
 		return models.ChannelInfo{}, fmt.Errorf("connection '%s' not found", connID)
 	}
-	ch := connInfo.Channels[channelNum]
+	var state *amqp.ChannelState
+	if ch := connInfo.Channels[channelNum]; ch != nil {
+		copied := *ch
+		state = &copied
+	}
 	user := connInfo.Client.Config.Username
-	return b.createChannelInfo(connID, channelNum, vh, ch, user)
+	b.mu.Unlock()
+	return createChannelInfo(connID, channelNum, vh, state, user)
 }
 
-// createChannelInfo creates a summary of the channel state.
-func (*Broker) createChannelInfo(connID vhost.ConnectionID, channelNum uint16, vh *vhost.VHost, ch *amqp.ChannelState, user string) (models.ChannelInfo, error) {
+// createChannelInfo creates a summary of the channel state. Call it without
+// b.mu (see channelRef).
+func createChannelInfo(connID vhost.ConnectionID, channelNum uint16, vh *vhost.VHost, ch *amqp.ChannelState, user string) (models.ChannelInfo, error) {
 	if connID == "" {
 		return models.ChannelInfo{}, fmt.Errorf("connection ID is empty")
 	}
