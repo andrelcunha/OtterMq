@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the key `secret`, so an admin token could be forged without logging in. The signing key is now
   generated per install, weak configured keys are refused, and `guest` is loopback-only (#203).
 
+### Added
+
+- Consumers are told when their queue is deleted: the broker sends them `basic.cancel`, as
+  RabbitMQ does, if their client advertises `consumer_cancel_notify` (amqp091-go does, and turns it
+  into `Channel.NotifyCancel`). The broker advertised the capability but never sent it, so these
+  consumers waited for messages that would never come (#320).
+
 ### Changed
 
 - Building OtterMQ now needs Go 1.26 or later (required by the upgraded dependencies). `go.mod`

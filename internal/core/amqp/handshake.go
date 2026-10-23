@@ -132,9 +132,10 @@ func handshake(cfg HandshakeConfig, conn net.Conn, connCtx context.Context) (*Co
 	frameMax = negotiated.FrameMax
 
 	config := &AmqpClientConfig{
-		Username: username,
-		Protocol: cfg.Protocol,
-		SSL:      cfg.SSL,
+		Username:             username,
+		Protocol:             cfg.Protocol,
+		SSL:                  cfg.SSL,
+		ConsumerCancelNotify: clientCapability(startOkFrame.ClientProperties, "consumer_cancel_notify"),
 	}
 	connCtx, cancel := context.WithCancel(connCtx)
 	client := NewAmqpClient(conn, config, connCtx, cancel)
@@ -220,6 +221,17 @@ func sendHandshakeClose(conn net.Conn, replyCode ReplyCode, methodID uint16, tex
 // loopbackOnly reports whether user is one of loopbackUsers.
 func loopbackOnly(loopbackUsers []string, user string) bool {
 	return slices.Contains(loopbackUsers, user)
+}
+
+// clientCapability reports whether the client-properties of connection.start-ok
+// set the named capability to true in their "capabilities" table.
+func clientCapability(clientProperties map[string]any, name string) bool {
+	capabilities, ok := clientProperties["capabilities"].(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, ok := capabilities[name].(bool)
+	return ok && enabled
 }
 
 // isLoopbackAddr reports whether addr is a loopback IP address.

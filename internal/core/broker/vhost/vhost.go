@@ -68,6 +68,10 @@ type VHost struct {
 
 type FrameSender interface {
 	SendFrame(connID ConnectionID, channel uint16, frame []byte) error
+	// ConsumerCancelNotify reports whether the connection's client
+	// advertised the consumer_cancel_notify capability, i.e. accepts a
+	// basic.cancel from the server for a consumer the server removed.
+	ConsumerCancelNotify(connID ConnectionID) bool
 }
 
 type VHostOptions struct {

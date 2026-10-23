@@ -33,6 +33,10 @@ type AmqpClientConfig struct {
 	Username string
 	Protocol string
 	SSL      bool
+	// ConsumerCancelNotify is set when the client advertised the
+	// consumer_cancel_notify capability: the server may then send it
+	// basic.cancel for a consumer it removed.
+	ConsumerCancelNotify bool
 }
 
 func NewAmqpClient(conn net.Conn, config *AmqpClientConfig, connCtx context.Context, cancel context.CancelFunc) *AmqpClient {

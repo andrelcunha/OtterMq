@@ -24,6 +24,9 @@ type Framer interface {
 	CreateBasicGetOkFrame(channel uint16, exchange, routingkey string, msgCount uint32, deliveryTag uint64, redelivered bool) []byte
 	CreateBasicConsumeOkFrame(channel uint16, consumerTag string) []byte
 	CreateBasicCancelOkFrame(channel uint16, consumerTag string) []byte
+	// CreateBasicCancelFrame builds a server-sent basic.cancel (nowait) for
+	// clients that advertise consumer_cancel_notify.
+	CreateBasicCancelFrame(channel uint16, consumerTag string) []byte
 	CreateBasicRecoverOkFrame(channel uint16) []byte
 
 	// Queue Methods
@@ -161,6 +164,10 @@ func (d *DefaultFramer) CreateBasicReturnFrame(channel uint16, replyCode uint16,
 
 func (d *DefaultFramer) CreateBasicConsumeOkFrame(channel uint16, consumerTag string) []byte {
 	return createBasicConsumeOkFrame(channel, consumerTag)
+}
+
+func (d *DefaultFramer) CreateBasicCancelFrame(channel uint16, consumerTag string) []byte {
+	return createBasicCancelFrame(channel, consumerTag)
 }
 
 func (d *DefaultFramer) CreateBasicCancelOkFrame(channel uint16, consumerTag string) []byte {

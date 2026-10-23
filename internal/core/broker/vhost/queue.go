@@ -516,16 +516,27 @@ func NewQueueProperties() *QueueProperties {
 	}
 }
 
+// DeleteQueuebyName deletes a queue and removes its consumers. Each removed
+// consumer whose client advertised consumer_cancel_notify is sent
+// basic.cancel, after vh.mu is released and before this returns (so before
+// the caller's queue.delete-ok).
 func (vh *VHost) DeleteQueuebyName(name string) error {
 	vh.mu.Lock()
-	defer vh.mu.Unlock()
-	return vh.deleteQueuebyNameUnlocked(name)
+	removed, err := vh.deleteQueuebyNameUnlocked(name)
+	cancels := vh.consumerCancelsLocked(removed, "")
+	vh.mu.Unlock()
+
+	cancels.send()
+	return err
 }
 
-func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
+// deleteQueuebyNameUnlocked deletes a queue and returns the consumers it
+// removed, also when it fails after removing them. The caller holds vh.mu
+// and decides which of them to send basic.cancel (see consumerCancelsLocked).
+func (vh *VHost) deleteQueuebyNameUnlocked(name string) ([]*Consumer, error) {
 	queue, exists := vh.Queues[name]
 	if !exists { // double check
-		return errors.NewChannelError(
+		return nil, errors.NewChannelError(
 			fmt.Sprintf("no queue '%s' in vhost '%s'", name, vh.Name),
 			uint16(amqp.NOT_FOUND),
 			uint16(amqp.QUEUE),
@@ -549,7 +560,7 @@ func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
 
 	// Remove the queue from the VHost's queue map
 	delete(vh.Queues, name)
-	vh.removeQueueConsumersLocked(name)
+	removed := vh.removeQueueConsumersLocked(name)
 	vh.detachQueueDeliveriesLocked(name)
 	vh.collector.RemoveQueue(queue.Name)
 	log.Debug().Str("queue", name).Msg("Deleted queue")
@@ -558,10 +569,10 @@ func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
 	if queue.Props.Durable {
 		if err := vh.persist.DeleteQueueMetadata(vh.Name, name); err != nil {
 			log.Error().Err(err).Str("queue", name).Msg("Failed to delete queue from persistence")
-			return err
+			return removed, err
 		}
 	}
-	return nil
+	return removed, nil
 }
 
 func (qp *QueueProperties) ToPersistence() persistence.QueueProperties {

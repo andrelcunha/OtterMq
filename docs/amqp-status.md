@@ -120,7 +120,7 @@ Status levels:
 | basic.qos-ok | ✅ | |
 | basic.consume | ✅ | ‼️`noLocal` not supported (same as RabbitMQ)  |
 | basic.consume-ok | ✅ | |
-| basic.cancel | ✅ | Automatically requeues unacked messages per AMQP spec |
+| basic.cancel | ✅ | Automatically requeues unacked messages per AMQP spec. Also sent by the server (`nowait`) to the consumers of a deleted queue, if the client advertises `consumer_cancel_notify` |
 | basic.cancel-ok | ✅ | |
 | basic.publish | ✅ | |
 | basic.return | ✅ | ‼️`immediate` flag is deprecated and will not be implemented |
@@ -165,6 +165,7 @@ Beyond core AMQP 0.9.1, OtterMQ implements popular RabbitMQ extensions:
 |-----------|--------|---------------|---------------|
 | **Dead Letter Exchange (DLX)** | ✅ Full | `OTTERMQ_ENABLE_DLX=true` | [DLX Guide](./dead-letter-exchange) |
 | **Message TTL** | ✅ Full | `OTTERMQ_ENABLE_TTL=true` | [TTL Guide](./message-ttl) |
+| **Consumer cancel notification** | ⚠️ Partial | Always on (client capability `consumer_cancel_notify`) | [below](#consumer-cancel-notification) |
 
 ### Extension Details
 
@@ -183,6 +184,12 @@ Beyond core AMQP 0.9.1, OtterMQ implements popular RabbitMQ extensions:
 - Lazy expiration: Checked at retrieval time (delivery, basic.get, requeue)
 - DLX integration: Expired messages routed to DLX with reason `"expired"`
 - Compatible with RabbitMQ TTL semantics
+
+#### Consumer Cancel Notification
+
+- When a queue is deleted (`queue.delete`, the management API, or a closing connection's exclusive queue), each of its consumers is sent `basic.cancel` with `nowait`, if its client advertised `consumer_cancel_notify` in its `client-properties` capabilities. Clients without it are not told.
+- A consumer on the connection that is closing is not notified.
+- Queue deletion is the only trigger. RabbitMQ also notifies on mirrored queue failover, which doesn't apply to OtterMQ.
 
 ---
 

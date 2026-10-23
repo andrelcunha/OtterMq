@@ -31,6 +31,8 @@ func (m *mockFrameSender) SendFrame(connID ConnectionID, channel uint16, frame [
 	return nil
 }
 
+func (*mockFrameSender) ConsumerCancelNotify(ConnectionID) bool { return false }
+
 func TestHandleBasicRecover_RequeueTrue(t *testing.T) {
 	vh := setupTestVHost()
 	connID := newTestConsumerConnID()

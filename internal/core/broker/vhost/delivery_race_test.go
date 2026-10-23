@@ -20,6 +20,8 @@ func (s *discardSender) SendFrame(ConnectionID, uint16, []byte) error {
 	return nil
 }
 
+func (*discardSender) ConsumerCancelNotify(ConnectionID) bool { return false }
+
 func newRaceTestVHost(t *testing.T) *VHost {
 	t.Helper()
 	vh := NewVhost("race-vhost", VHostOptions{
