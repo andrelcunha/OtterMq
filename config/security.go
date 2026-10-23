@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -40,45 +41,84 @@ func ResolveJwtSecret(cfg *Config) (secret string, weak bool, err error) {
 }
 
 // loadOrCreateJwtKey reads the key from <dataDir>/jwt.key, generating it on
-// first use.
+// first use. A new key is written to a temp file and linked into place, so
+// jwt.key either doesn't exist or holds a whole key, even if the broker
+// crashes or several brokers start on the same data dir at once.
 func loadOrCreateJwtKey(dataDir string) (string, error) {
 	path := filepath.Join(dataDir, jwtKeyFile)
-	data, err := os.ReadFile(path)
-	if err == nil {
-		key := strings.TrimSpace(string(data))
-		if len(key) < MinJwtSecretLen {
-			return "", fmt.Errorf("%s holds a key shorter than %d bytes; remove it to have a new one generated", path, MinJwtSecretLen)
-		}
-		return key, nil
-	}
+	key, err := readJwtKey(path)
 	if !errors.Is(err, fs.ErrNotExist) {
-		return "", err
+		return key, err
 	}
 
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
-	key := hex.EncodeToString(raw)
+	key = hex.EncodeToString(raw)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return "", err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return loadOrCreateJwtKey(dataDir) // created by a concurrent start
-	}
+	tmp, err := os.CreateTemp(dataDir, jwtKeyFile+".tmp-*")
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.WriteString(key + "\n"); err != nil {
-		f.Close()
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
 		return "", err
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
+	if _, err := tmp.WriteString(key + "\n"); err != nil {
+		tmp.Close()
 		return "", err
 	}
-	return key, f.Close()
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Link(tmp.Name(), path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return readJwtKey(path) // created by a concurrent start
+		}
+		return "", err
+	}
+	return key, syncDir(dataDir)
+}
+
+// readJwtKey reads and checks a key file written by loadOrCreateJwtKey.
+func readJwtKey(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	key := strings.TrimSpace(string(data))
+	if len(key) < MinJwtSecretLen {
+		return "", fmt.Errorf("%s holds a key shorter than %d bytes; remove it to have a new one generated", path, MinJwtSecretLen)
+	}
+	return key, nil
+}
+
+// syncDir flushes a directory entry, so a new link survives a crash.
+// Windows cannot fsync a directory, and NTFS doesn't need it.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // loopbackUsersFromEnv reads OTTERMQ_LOOPBACK_USERS, a comma-separated list
