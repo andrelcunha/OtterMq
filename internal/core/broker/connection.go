@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -145,8 +147,9 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 
 // registerConnection adds a connection that finished its handshake. It
 // returns false, registering nothing, once the broker is shutting down. The
-// check runs under b.mu, which BroadcastConnectionClose also holds, so a
-// connection either gets the shutdown connection.close or is refused here.
+// check runs under b.mu, under which BroadcastConnectionClose also copies the
+// connections, so a connection either gets the shutdown connection.close or
+// is refused here.
 func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) bool {
 	b.mu.Lock()
 	if b.ShuttingDown.Load() {
@@ -247,14 +250,46 @@ func (b *Broker) registerHeartbeat(client *amqp.AmqpClient) bool {
 	return true
 }
 
+// broadcastCloseTimeout bounds the shutdown connection.close write to one
+// client, so a client that has stopped reading can't stall shutdown.
+const broadcastCloseTimeout = time.Second
+
+// BroadcastConnectionClose sends connection.close (320 CONNECTION_FORCED) to
+// every connection. The connections are copied under b.mu and written to
+// after it is released, in parallel, each with a write deadline. A client
+// whose write times out is disconnected, since its stream may now hold a
+// partial frame.
 func (b *Broker) BroadcastConnectionClose() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for conn := range b.connInfos {
-		if _, err := b.sendConnectionClosing(conn, 0, uint16(amqp.CONNECTION_FORCED), 0, 0, amqp.ReplyText[amqp.CONNECTION_FORCED]); err != nil {
-			log.Error().Err(err).Msg("Failed to send close connection")
-		}
+	type target struct {
+		conn   net.Conn
+		client *amqp.AmqpClient
 	}
+	b.mu.Lock()
+	targets := make([]target, 0, len(b.connInfos))
+	for conn, connInfo := range b.connInfos {
+		targets = append(targets, target{conn, connInfo.Client})
+	}
+	b.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = t.conn.SetWriteDeadline(time.Now().Add(broadcastCloseTimeout))
+			_, err := b.sendConnectionClosing(t.conn, 0, uint16(amqp.CONNECTION_FORCED), 0, 0, amqp.ReplyText[amqp.CONNECTION_FORCED])
+			if err == nil {
+				// The connection keeps running until the client answers.
+				_ = t.conn.SetWriteDeadline(time.Time{})
+				return
+			}
+			log.Error().Err(err).Msg("Failed to send close connection")
+			if t.client != nil {
+				t.client.CloseConn()
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (b *Broker) connectionHandler(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
