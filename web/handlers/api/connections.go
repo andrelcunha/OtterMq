@@ -4,9 +4,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/ottermq/ottermq/internal/core/broker"
 	"github.com/ottermq/ottermq/internal/core/models"
-	"github.com/gofiber/fiber/v2"
 )
 
 // ListConnections godoc

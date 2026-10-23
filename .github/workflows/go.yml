@@ -21,6 +21,15 @@ jobs:
       with:
         go-version-file: go.mod
 
+    - name: Check formatting
+      run: |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "These files aren't gofmt-formatted; run gofmt -w on them:"
+          echo "$unformatted"
+          exit 1
+        fi
+
     - name: Go Build
       run: go build -v ./...
 

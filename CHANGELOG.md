@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug and trace logs no longer dump raw AMQP frames, method payloads or message bodies. They
   log the decoded fields instead (channel, queue, exchange, routing key, reply code and text,
   class and method, frame and body sizes) (#328).
+- CI now fails when a Go file isn't `gofmt`-formatted, and the whole tree has been formatted once
+  (#329).
 
 ### Removed
 

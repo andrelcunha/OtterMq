@@ -3,10 +3,10 @@ package api
 import (
 	"strings"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/ottermq/ottermq/internal/core/broker"
 	"github.com/ottermq/ottermq/internal/core/models"
 	"github.com/ottermq/ottermq/internal/persistdb"
-	"github.com/gofiber/fiber/v2"
 )
 
 // mandatoryExchanges are auto-created per vhost and must not appear in exports.

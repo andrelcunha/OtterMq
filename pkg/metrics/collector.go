@@ -63,11 +63,11 @@ type ExchangeMetrics struct {
 
 // QueueMetrics tracks statistics for a single queue
 type QueueMetrics struct {
-	Name         string
-	PublishRate  *RateTracker // Messages enqueued per second
-	DeliveryRate *RateTracker // Messages delivered per second
-	AckRate      *RateTracker // ACKs per second
-	Depth        atomic.Int64 // Current queue depth
+	Name          string
+	PublishRate   *RateTracker // Messages enqueued per second
+	DeliveryRate  *RateTracker // Messages delivered per second
+	AckRate       *RateTracker // ACKs per second
+	Depth         atomic.Int64 // Current queue depth
 	PublishCount  atomic.Int64 // Cumulative enqueue count (for rate calculation)
 	DeliveryCount atomic.Int64 // Cumulative delivery count (for rate calculation)
 	UnackedCount  atomic.Int64 // Current unacknowledged messages

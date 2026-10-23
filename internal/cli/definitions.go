@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 func NewDefinitionsCmd(rt *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "definitions",

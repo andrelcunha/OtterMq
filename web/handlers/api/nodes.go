@@ -3,9 +3,9 @@ package api
 import (
 	"runtime"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/ottermq/ottermq/internal/core/broker"
 	"github.com/ottermq/ottermq/internal/core/models"
-	"github.com/gofiber/fiber/v2"
 )
 
 // ListNodes godoc
