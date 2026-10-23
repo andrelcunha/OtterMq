@@ -108,7 +108,10 @@ func (b *Broker) queueDeleteHandler(request *amqp.RequestMethodMessage, vh *vhos
 
 	// Honor no-wait flag
 	if !content.NoWait {
-		frame := b.framer.CreateQueueDeleteOkFrame(request.Channel, messageCount)
+		frame, err := b.framer.CreateQueueDeleteOkFrame(request.Channel, messageCount)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send queue.delete-ok frame")
 		}
@@ -136,7 +139,10 @@ func (b *Broker) queuePurgeHandler(request *amqp.RequestMethodMessage, vh *vhost
 
 	// Honor no-wait flag
 	if !content.NoWait {
-		frame := b.framer.CreateQueuePurgeOkFrame(request.Channel, messageCount)
+		frame, err := b.framer.CreateQueuePurgeOkFrame(request.Channel, messageCount)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send queue.purge-ok frame")
 			return nil, err
@@ -167,7 +173,10 @@ func (b *Broker) queueBindHandler(request *amqp.RequestMethodMessage, vh *vhost.
 	if err != nil {
 		return sendChannelErrorResponse(err, b, conn, request)
 	}
-	frame := b.framer.CreateQueueBindOkFrame(request.Channel)
+	frame, err := b.framer.CreateQueueBindOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
 	if err := b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send queue bind ok frame")
 	}
@@ -193,7 +202,10 @@ func (b *Broker) queueUnbindHandler(request *amqp.RequestMethodMessage, vh *vhos
 	if err != nil {
 		return sendChannelErrorResponse(err, b, conn, request)
 	}
-	frame := b.framer.CreateQueueUnbindOkFrame(request.Channel)
+	frame, err := b.framer.CreateQueueUnbindOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
 	if err := b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send queue unbind ok frame")
 	}
@@ -233,7 +245,10 @@ func (b *Broker) queueDeclareHandler(request *amqp.RequestMethodMessage, vh *vho
 	consumerCount := uint32(0)
 
 	if !content.NoWait {
-		frame := b.framer.CreateQueueDeclareOkFrame(request.Channel, queue.Name, messageCount, consumerCount)
+		frame, err := b.framer.CreateQueueDeclareOkFrame(request.Channel, queue.Name, messageCount, consumerCount)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send queue declare frame")
 		}
@@ -243,13 +258,15 @@ func (b *Broker) queueDeclareHandler(request *amqp.RequestMethodMessage, vh *vho
 
 func sendChannelErrorResponse(err error, b *Broker, conn net.Conn, request *amqp.RequestMethodMessage) (any, error) {
 	if amqpErr, ok := err.(errors.AMQPError); ok {
-		b.sendChannelClosing(conn,
+		if sendErr := b.sendChannelClosing(conn,
 			request.Channel,
 			amqpErr.ReplyCode(),
 			amqpErr.ClassID(),
 			amqpErr.MethodID(),
 			amqpErr.ReplyText(),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		return nil, nil
 	}
 	return nil, err

@@ -484,7 +484,7 @@ func TestFormatMethodPayload(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload := formatMethodPayload(tt.content)
+			payload := requireEncoded(t)(formatMethodPayload(tt.content))
 			tt.validate(t, payload)
 		})
 	}
@@ -498,7 +498,7 @@ func TestCreateBasicReturnFrame(t *testing.T) {
 	exchange := "test-exchange"
 	routingKey := "test.key"
 
-	frame := framer.CreateBasicReturnFrame(channel, replyCode, replyText, exchange, routingKey)
+	frame := requireEncoded(t)(framer.CreateBasicReturnFrame(channel, replyCode, replyText, exchange, routingKey))
 
 	if len(frame) < 8 {
 		t.Fatalf("Frame too short: %d bytes", len(frame))
@@ -564,7 +564,7 @@ func TestCreateBasicReturnFrame_EmptyStrings(t *testing.T) {
 	channel := uint16(2)
 	replyCode := uint16(312)
 
-	frame := framer.CreateBasicReturnFrame(channel, replyCode, "", "", "")
+	frame := requireEncoded(t)(framer.CreateBasicReturnFrame(channel, replyCode, "", "", ""))
 
 	if len(frame) < 8 {
 		t.Fatalf("Frame too short: %d bytes", len(frame))
@@ -597,7 +597,7 @@ func TestCreateBasicReturnFrame_LongStrings(t *testing.T) {
 		longText = longText[:i] + "x" + longText[i+1:]
 	}
 
-	frame := framer.CreateBasicReturnFrame(channel, replyCode, longText, longText, longText)
+	frame := requireEncoded(t)(framer.CreateBasicReturnFrame(channel, replyCode, longText, longText, longText))
 
 	if len(frame) < 8 {
 		t.Fatalf("Frame too short: %d bytes", len(frame))

@@ -55,8 +55,11 @@ func (b *Broker) handleConnectionPanic(conn net.Conn, connInfo *amqp.ConnectionI
 
 	// The peer may not be reading; don't let it block us.
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
-	frame := b.framer.CreateConnectionCloseFrame(0, uint16(amqp.INTERNAL_ERROR), 0, 0, amqp.ReplyText[amqp.INTERNAL_ERROR])
-	if err := b.framer.SendFrame(conn, frame); err != nil {
+	frame, err := b.framer.CreateConnectionCloseFrame(0, uint16(amqp.INTERNAL_ERROR), 0, 0, amqp.ReplyText[amqp.INTERNAL_ERROR])
+	if err == nil {
+		err = b.framer.SendFrame(conn, frame)
+	}
+	if err != nil {
 		log.Debug().Err(err).Msg("Failed to send connection.close after panic")
 	}
 

@@ -375,13 +375,15 @@ func (b *Broker) processRequest(conn net.Conn, newState *amqp.ChannelState) (any
 		return b.txHandler(request, vh, conn)
 	default:
 		log.Debug().Uint16("class_id", request.ClassID).Msg("Unsupported class ID")
-		b.sendConnectionClosing(conn,
+		if _, sendErr := b.sendConnectionClosing(conn,
 			request.Channel,
 			uint16(amqp.COMMAND_INVALID),
 			uint16(request.ClassID),
 			uint16(request.MethodID),
 			fmt.Sprintf("unsupported class ID %d", request.ClassID),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		b.setConnectionClosingState(conn)
 		return nil, nil
 	}
@@ -1000,13 +1002,15 @@ func (b *Broker) CloseConnection(name string, reason string) error {
 	}
 
 	log.Info().Str("connection", name).Str("reason", reason).Msg("Closing connection by management request")
-	b.sendConnectionClosing(targetConn,
+	if _, sendErr := b.sendConnectionClosing(targetConn,
 		0, // channel 0 for connection-level frames
 		uint16(amqp.CONNECTION_FORCED),
 		0,
 		0,
 		reason,
-	)
+	); sendErr != nil {
+		return sendErr
+	}
 	b.setConnectionClosingState(targetConn)
 	return nil
 }

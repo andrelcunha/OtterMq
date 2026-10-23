@@ -24,24 +24,22 @@ type ExchangeDeleteMessage struct {
 	NoWait       bool
 }
 
-func createExchangeDeclareFrameOk(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createExchangeDeclareFrameOk(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(EXCHANGE),
 		MethodID: uint16(EXCHANGE_DECLARE_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createExchangeDeleteFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createExchangeDeleteFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(EXCHANGE),
 		MethodID: uint16(EXCHANGE_DELETE_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
 func parseExchangeMethod(methodID uint16, payload []byte) (interface{}, error) {

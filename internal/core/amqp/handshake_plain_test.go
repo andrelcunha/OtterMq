@@ -87,12 +87,16 @@ func addPlainTestUser(t *testing.T, username, password string) {
 
 // startOkPayload encodes a connection.start-ok method payload carrying
 // response as its PLAIN response.
-func startOkPayload(response string) []byte {
+func startOkPayload(t testing.TB, response string) []byte {
 	var method bytes.Buffer
-	EncodeLongStr(&method, EncodeTable(map[string]any{"product": "test"}))
-	EncodeShortStr(&method, "PLAIN")
+	EncodeLongStr(&method, requireEncoded(t)(EncodeTable(map[string]any{"product": "test"})))
+	if err := EncodeShortStr(&method, "PLAIN"); err != nil {
+		t.Fatal(err)
+	}
 	EncodeLongStr(&method, []byte(response))
-	EncodeShortStr(&method, "en_US")
+	if err := EncodeShortStr(&method, "en_US"); err != nil {
+		t.Fatal(err)
+	}
 
 	payload := binary.BigEndian.AppendUint16(nil, uint16(CONNECTION))
 	payload = binary.BigEndian.AppendUint16(payload, uint16(CONNECTION_START_OK))
@@ -118,7 +122,7 @@ func TestStartOk_PlainCredentialsAuthenticate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state, err := parseMethodFrame(0, startOkPayload(tt.response))
+			state, err := parseMethodFrame(0, startOkPayload(t, tt.response))
 			if err != nil {
 				t.Fatalf("parseMethodFrame: %v", err)
 			}
@@ -153,7 +157,7 @@ func TestStartOk_PlainCredentialsRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state, err := parseMethodFrame(0, startOkPayload(tt.response))
+			state, err := parseMethodFrame(0, startOkPayload(t, tt.response))
 			if err != nil {
 				t.Fatalf("parseMethodFrame: %v", err)
 			}

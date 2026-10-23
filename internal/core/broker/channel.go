@@ -56,8 +56,11 @@ func (b *Broker) handleOpenChannel(request *amqp.RequestMethodMessage, conn net.
 	}
 	b.registerChannel(conn, request)
 
-	frame := b.framer.CreateChannelOpenOkFrame(request.Channel)
-	if err := b.framer.SendFrame(conn, frame); err != nil {
+	frame, err := b.framer.CreateChannelOpenOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
+	if err = b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send channel open ok frame")
 	}
 	return nil, nil
@@ -75,14 +78,16 @@ func (b *Broker) handleChannelFlow(request *amqp.RequestMethodMessage, vh *vhost
 			uint16(amqp.CHANNEL),
 			uint16(amqp.CHANNEL_FLOW),
 		)
-		b.sendConnectionClosing(
+		if _, sendErr := b.sendConnectionClosing(
 			conn,
 			channel,
 			amqpErr.ReplyCode(),
 			amqpErr.ClassID(),
 			amqpErr.MethodID(),
 			amqpErr.Error(),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		return nil, amqpErr
 	}
 	flowActive := content.Active
@@ -99,14 +104,16 @@ func (b *Broker) handleChannelFlow(request *amqp.RequestMethodMessage, vh *vhost
 			uint16(amqp.CHANNEL),
 			uint16(amqp.CHANNEL_FLOW),
 		)
-		b.sendChannelClosing(
+		if sendErr := b.sendChannelClosing(
 			conn,
 			channel,
 			amqpErr.ReplyCode(),
 			amqpErr.ClassID(),
 			amqpErr.MethodID(),
 			amqpErr.Error(),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		return nil, amqpErr
 	}
 	// Client-initiated flow control (flowInitiatedByBroker = false)
@@ -128,20 +135,25 @@ func (b *Broker) handleChannelFlow(request *amqp.RequestMethodMessage, vh *vhost
 			uint16(amqp.CHANNEL),
 			uint16(amqp.CHANNEL_FLOW),
 		)
-		b.sendChannelClosing(
+		if sendErr := b.sendChannelClosing(
 			conn,
 			channel,
 			amqpErr.ReplyCode(),
 			amqpErr.ClassID(),
 			amqpErr.MethodID(),
 			amqpErr.Error(),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		return nil, amqpErr
 	}
 
 	log.Debug().Uint16("channel", channel).Bool("flow_active", flowActive).Msg("Channel flow state updated")
 	// send channel.flow-ok
-	frame := b.framer.CreateChannelFlowOkFrame(channel, flowActive)
+	frame, err := b.framer.CreateChannelFlowOkFrame(channel, flowActive)
+	if err != nil {
+		return nil, err
+	}
 	err = b.framer.SendFrame(conn, frame)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to send channel flow ok frame")
@@ -165,14 +177,16 @@ func (b *Broker) handleChannelFlowOk(request *amqp.RequestMethodMessage, conn ne
 			uint16(amqp.CHANNEL),
 			uint16(amqp.CHANNEL_FLOW_OK),
 		)
-		b.sendChannelClosing(
+		if sendErr := b.sendChannelClosing(
 			conn,
 			channel,
 			amqpErr.ReplyCode(),
 			amqpErr.ClassID(),
 			amqpErr.MethodID(),
 			amqpErr.Error(),
-		)
+		); sendErr != nil {
+			return nil, sendErr
+		}
 		return nil, amqpErr
 	}
 	log.Debug().Uint16("channel", channel).Msg("Channel flow ok received")
@@ -190,8 +204,11 @@ func (b *Broker) handleChannelClose(request *amqp.RequestMethodMessage, conn net
 	// connection error.
 	b.cleanupChannel(conn, request.Channel)
 	// send channel close ok
-	frame := b.framer.CreateChannelCloseOkFrame(request.Channel)
-	err := b.framer.SendFrame(conn, frame)
+	frame, err := b.framer.CreateChannelCloseOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
+	err = b.framer.SendFrame(conn, frame)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to send channel close ok frame")
 		return nil, err

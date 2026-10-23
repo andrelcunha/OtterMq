@@ -28,14 +28,14 @@ func sendHeartbeat(conn net.Conn) error {
 	return sendFrame(conn, heartbeatFrame)
 }
 
-func createConnectionCloseFrame(channel, replyCode, classID, methodID uint16, replyText string) []byte {
+func createConnectionCloseFrame(channel, replyCode, classID, methodID uint16, replyText string) ([]byte, error) {
 	replyCodeKv := KeyValue{
 		Key:   INT_SHORT,
 		Value: replyCode,
 	}
 	replyTextKv := KeyValue{
 		Key:   STRING_SHORT,
-		Value: replyText,
+		Value: truncateCloseReplyText(replyText),
 	}
 	classIDKv := KeyValue{
 		Key:   INT_SHORT,
@@ -48,23 +48,21 @@ func createConnectionCloseFrame(channel, replyCode, classID, methodID uint16, re
 	content := ContentList{
 		KeyValuePairs: []KeyValue{replyCodeKv, replyTextKv, classIDKv, methodIDKv},
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CONNECTION),
 		MethodID: uint16(CONNECTION_CLOSE),
 		Content:  content,
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createConnectionCloseOkFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createConnectionCloseOkFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CONNECTION),
 		MethodID: uint16(CONNECTION_CLOSE_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
 func createConnectionStartFrame(cfg HandshakeConfig) ([]byte, error) {
@@ -83,7 +81,10 @@ func createConnectionStartFrame(cfg HandshakeConfig) ([]byte, error) {
 	payloadBuf.WriteByte(0) // version-major
 	payloadBuf.WriteByte(9) // version-minor
 
-	encodedProperties := EncodeTable(cfg.ServerProperties)
+	encodedProperties, err := EncodeTable(cfg.ServerProperties)
+	if err != nil {
+		return nil, err
+	}
 	EncodeLongStr(&payloadBuf, encodedProperties)
 	EncodeLongStr(&payloadBuf, []byte(cfg.Mechanisms[0]))
 	EncodeLongStr(&payloadBuf, []byte(cfg.Locales[0]))

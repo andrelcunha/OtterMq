@@ -34,7 +34,7 @@ func TestEncodeDecodeXDeathHeader(t *testing.T) {
 	}
 
 	// Encode
-	encoded := EncodeTable(headers)
+	encoded := requireEncoded(t)(EncodeTable(headers))
 	require.NotEmpty(t, encoded, "Encoded table should not be empty")
 
 	t.Logf("Encoded length: %d bytes", len(encoded))

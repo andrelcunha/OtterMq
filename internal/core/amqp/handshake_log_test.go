@@ -51,7 +51,7 @@ func TestParseStartOk_DoesNotLogPassword(t *testing.T) {
 		zerolog.SetGlobalLevel(level)
 	})
 
-	if _, err := parseMethodFrame(0, startOkPayload("\x00alice\x00"+password)); err != nil {
+	if _, err := parseMethodFrame(0, startOkPayload(t, "\x00alice\x00"+password)); err != nil {
 		t.Fatalf("parseMethodFrame: %v", err)
 	}
 

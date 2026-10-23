@@ -44,8 +44,8 @@ type QueuePurgeMessage struct {
 	NoWait    bool
 }
 
-func createQueueDeclareOkFrame(channel uint16, queueName string, messageCount, consumerCount uint32) []byte {
-	frame := ResponseMethodMessage{
+func createQueueDeclareOkFrame(channel uint16, queueName string, messageCount, consumerCount uint32) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(QUEUE),
 		MethodID: uint16(QUEUE_DECLARE_OK),
@@ -66,25 +66,23 @@ func createQueueDeclareOkFrame(channel uint16, queueName string, messageCount, c
 			},
 		},
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createQueueAckFrame creates a method frame without additional content.
 // To be used for QueueBindOk and QueueUnbindOk responses.
-func createQueueAckFrame(channel, method uint16) []byte {
-	frame := ResponseMethodMessage{
+func createQueueAckFrame(channel, method uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(QUEUE),
 		MethodID: method,
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createQueueCountAckFrame creates a method frame with the message count.
 // To be used for QueueDeleteOk and QueuePurgeOk responses.
-func createQueueCountAckFrame(channel, methodID uint16, messageCount uint32) []byte {
-	frame := ResponseMethodMessage{
+func createQueueCountAckFrame(channel, methodID uint16, messageCount uint32) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(QUEUE),
 		MethodID: methodID,
@@ -97,7 +95,6 @@ func createQueueCountAckFrame(channel, methodID uint16, messageCount uint32) []b
 			},
 		},
 	}.FormatMethodFrame()
-	return frame
 }
 
 func parseQueueMethod(methodID uint16, payload []byte) (any, error) {

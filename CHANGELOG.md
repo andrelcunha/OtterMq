@@ -76,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject AMQP short strings longer than 255 bytes and propagate encoding errors instead of
+  wrapping the length byte and emitting a corrupted frame. Informational channel/connection
+  close texts are truncated at a UTF-8 boundary, so long valid queue names still receive a
+  channel error without losing the connection (#181).
 - Closing a channel, from the client or by the broker after a channel exception, left its
   consumers running and its unacked messages assigned to it. The broker kept delivering to the
   closed channel, and amqp091-go clients dropped the whole connection with 504 CHANNEL_ERROR.

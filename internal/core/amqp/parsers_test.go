@@ -118,7 +118,7 @@ func TestParseMethodFrame_ConnectionClass(t *testing.T) {
 		"product": "OtterMQ Test",
 		"version": "1.0.0",
 	}
-	encodedProps := EncodeTable(clientProps)
+	encodedProps := requireEncoded(t)(EncodeTable(clientProps))
 	EncodeLongStr(&methodPayload, encodedProps)
 
 	// Mechanism (short string)
@@ -223,7 +223,7 @@ func TestParseMethodFrame_QueueClass(t *testing.T) {
 
 	// Arguments (table)
 	args := map[string]any{}
-	encodedArgs := EncodeTable(args)
+	encodedArgs := requireEncoded(t)(EncodeTable(args))
 	EncodeLongStr(&methodPayload, encodedArgs)
 
 	// Create full payload with class and method IDs
@@ -272,7 +272,7 @@ func TestParseMethodFrame_ExchangeClass(t *testing.T) {
 
 	// Arguments (table)
 	args := map[string]any{}
-	encodedArgs := EncodeTable(args)
+	encodedArgs := requireEncoded(t)(EncodeTable(args))
 	EncodeLongStr(&methodPayload, encodedArgs)
 
 	// Create full payload with class and method IDs

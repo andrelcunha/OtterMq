@@ -403,7 +403,7 @@ func buildBasicConsumePayload(t *testing.T, params BasicConsumeParams) []byte {
 
 	// arguments (table encoded as longstr)
 	if params.Arguments != nil {
-		tableData := EncodeTable(params.Arguments)
+		tableData := requireEncoded(t)(EncodeTable(params.Arguments))
 
 		// Write table length (4 bytes)
 		if err := binary.Write(&buf, binary.BigEndian, uint32(len(tableData))); err != nil {
@@ -614,7 +614,7 @@ func TestCreateBasicDeliverFrame(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Call the function under test
-			frame := createBasicDeliverFrame(tt.channel, tt.consumerTag, tt.exchange, tt.routingKey, tt.deliveryTag, tt.redelivered)
+			frame := requireEncoded(t)(createBasicDeliverFrame(tt.channel, tt.consumerTag, tt.exchange, tt.routingKey, tt.deliveryTag, tt.redelivered))
 
 			// Verify frame is not empty
 			if len(frame) == 0 {
@@ -673,7 +673,7 @@ func TestCreateBasicDeliverFrame_ContentStructure(t *testing.T) {
 	deliveryTag := uint64(789)
 	redelivered := true
 
-	frame := createBasicDeliverFrame(channel, consumerTag, exchange, routingKey, deliveryTag, redelivered)
+	frame := requireEncoded(t)(createBasicDeliverFrame(channel, consumerTag, exchange, routingKey, deliveryTag, redelivered))
 
 	// Verify frame is created
 	if frame == nil {
@@ -749,7 +749,7 @@ func TestCreateBasicDeliverFrame_EdgeCases(t *testing.T) {
 				}
 			}()
 
-			frame := createBasicDeliverFrame(tt.channel, tt.consumerTag, tt.exchange, tt.routingKey, tt.deliveryTag, tt.redelivered)
+			frame := requireEncoded(t)(createBasicDeliverFrame(tt.channel, tt.consumerTag, tt.exchange, tt.routingKey, tt.deliveryTag, tt.redelivered))
 
 			if len(frame) == 0 {
 				t.Errorf("Expected non-empty frame for case: %s", tt.description)
