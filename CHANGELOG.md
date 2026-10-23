@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **The JSON persistence layout changed, and a data dir with durable entities from v0.21 or
+  earlier is refused.** Queue, exchange and vhost names are now encoded into file names
+  instead of being used as paths (#234). On startup the broker checks for
+  `<OTTERMQ_DATA_DIR>/persistence.json`. If it is missing and `vhosts/` holds entity files from
+  the old layout, the broker exits with an error rather than misreading them. To upgrade, back
+  up and remove `<OTTERMQ_DATA_DIR>/vhosts/`. Durable queues, exchanges, bindings and persistent
+  messages in it are lost; users and permissions (`ottermq.db`) are kept. Alternatively, keep
+  running v0.21.x until you can recreate those entities. Data dirs without durable entities
+  upgrade without any action.
+
 ### Security
 
 - Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
@@ -33,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   broker with `fatal error: concurrent map read and map write`, which can't be recovered. Every
   broker map is now read and written under its lock, and a connection that disappears while one of
   its requests is in flight is treated as gone instead of panicking (#216).
+- Queue, exchange and vhost names can no longer reach outside the data dir. Names such as `..`,
+  `../x` or `a/b` used to become file paths: an authenticated client could create or delete
+  `.json` files elsewhere, and deleting a vhost named `..` removed the whole data dir, users
+  included. Names containing `/` now also persist and recover correctly (#234).
 
 ## [v0.21.1]
 

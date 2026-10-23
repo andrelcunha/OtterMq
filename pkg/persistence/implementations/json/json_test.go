@@ -3,22 +3,34 @@ package json
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ottermq/ottermq/pkg/persistence"
 )
 
-func TestSafeVHostName(t *testing.T) {
-	cases := map[string]string{
-		"/":          "%2F",
-		"vhost":      "vhost",
-		"vhost/test": "vhost%2Ftest",
-	}
-	for input, expected := range cases {
-		got := safeVHostName(input)
-		if got != expected {
-			t.Errorf("safeVHostName(%q) = %q, want %q", input, got, expected)
+// encodeName yields one lowercase path component that is never "." or "..",
+// fits in a file name, and decodes back unless it had to be hashed.
+func TestEncodeName(t *testing.T) {
+	seen := map[string]string{}
+	for _, name := range append([]string{"/", "vhost", "vhost/test", "amq.direct", strings.Repeat("x", 124)}, hostileNames...) {
+		enc := encodeName(name)
+		if enc == "" || enc == "." || enc == ".." || len(enc) > maxEncodedLen ||
+			strings.ContainsAny(enc, `/\`) || strings.ToLower(enc) != enc {
+			t.Errorf("encodeName(%q) = %q, not a safe lowercase component", name, enc)
 		}
+		if other, dup := seen[enc]; dup && other != name {
+			t.Errorf("encodeName(%q) = encodeName(%q) = %q", name, other, enc)
+		}
+		seen[enc] = name
+		if got, ok := decodeName(enc); ok && got != name {
+			t.Errorf("decodeName(encodeName(%q)) = %q", name, got)
+		} else if !ok && !strings.HasPrefix(enc, "h") {
+			t.Errorf("decodeName(%q) failed for a non-hashed name %q", enc, name)
+		}
+	}
+	if enc := encodeName(strings.Repeat("x", 255)); !strings.HasPrefix(enc, "h") || len(enc) != 65 {
+		t.Errorf("a 255-byte name encodes to %q, want h and a SHA-256", enc)
 	}
 }
 
@@ -66,7 +78,7 @@ func TestSaveLoadExchange(t *testing.T) {
 		t.Errorf("Loaded exchange does not match saved.\nSaved: %+v\nLoaded: %+v", exchange, loaded)
 	}
 	// Cleanup
-	safeName := safeVHostName(vhostName)
+	safeName := encodeName(vhostName)
 	os.RemoveAll("data/vhosts/" + safeName)
 }
 
@@ -108,7 +120,7 @@ func TestSaveLoadQueue(t *testing.T) {
 		t.Errorf("Loaded queue properties do not match saved.\nSaved: %+v\nLoaded: %+v", queue.Properties, loadedProps)
 	}
 	// Cleanup
-	safeName := safeVHostName(vhostName)
+	safeName := encodeName(vhostName)
 	os.RemoveAll("data/vhosts/" + safeName)
 }
 
@@ -152,7 +164,7 @@ func TestDeleteExchange(t *testing.T) {
 		t.Errorf("Expected error when loading deleted exchange, got nil")
 	}
 	// Cleanup
-	safeName := safeVHostName(vhostName)
+	safeName := encodeName(vhostName)
 	os.RemoveAll("data/vhosts/" + safeName)
 }
 
@@ -195,7 +207,7 @@ func TestDeleteQueue(t *testing.T) {
 		t.Errorf("Expected error when loading deleted queue, got nil")
 	}
 	// Cleanup
-	safeName := safeVHostName(vhostName)
+	safeName := encodeName(vhostName)
 	os.RemoveAll("data/vhosts/" + safeName)
 }
 
