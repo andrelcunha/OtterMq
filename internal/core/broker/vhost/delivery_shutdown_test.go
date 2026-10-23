@@ -20,6 +20,8 @@ func (s *cancelOnSendFrameSender) SendFrame(ConnectionID, uint16, []byte) error 
 	return nil
 }
 
+func (*cancelOnSendFrameSender) ConsumerCancelNotify(ConnectionID) bool { return false }
+
 // newQueueWithStoppedLoop returns a queue with one registered manual-ack
 // consumer and its delivery loop stopped, so a test can drive one loop
 // iteration itself with ctx as the loop's context.

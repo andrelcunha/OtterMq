@@ -45,6 +45,8 @@ func (s *gateSender) SendFrame(_ ConnectionID, channel uint16, _ []byte) error {
 	return nil
 }
 
+func (*gateSender) ConsumerCancelNotify(ConnectionID) bool { return false }
+
 func (s *gateSender) deliveredOn(channel uint16) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

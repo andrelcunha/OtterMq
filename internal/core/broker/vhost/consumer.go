@@ -3,7 +3,9 @@ package vhost
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ottermq/ottermq/internal/core/amqp"
 	"github.com/ottermq/ottermq/internal/core/amqp/errors"
@@ -44,6 +46,10 @@ type Consumer struct {
 	Props         *ConsumerProperties
 
 	frameSender FrameSender
+	// sendMu is held while a delivery to this consumer is checked and
+	// written, and while the server writes basic.cancel for it, so the
+	// cancel can't overtake a delivery already past its Active checks.
+	sendMu sync.Mutex
 }
 
 type ConsumerProperties struct {
@@ -312,13 +318,13 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 }
 
 // removeQueueConsumersLocked drops the consumers of a deleted queue from
-// every index. They are keyed by queue name, so left in place they would be
-// counted and delivered to by a queue later declared with the same name.
-// Their unacked deliveries are handled by detachQueueDeliveriesLocked. The
-// caller holds vh.mu.
-// TODO: send basic.cancel to clients that advertise consumer_cancel_notify.
-func (vh *VHost) removeQueueConsumersLocked(queueName string) {
-	for _, consumer := range vh.ConsumersByQueue[queueName] {
+// every index and returns them. They are keyed by queue name, so left in
+// place they would be counted and delivered to by a queue later declared
+// with the same name. Their unacked deliveries are handled by
+// detachQueueDeliveriesLocked. The caller holds vh.mu.
+func (vh *VHost) removeQueueConsumersLocked(queueName string) []*Consumer {
+	removed := vh.ConsumersByQueue[queueName]
+	for _, consumer := range removed {
 		consumer.Active.Store(false)
 		key := ConsumerKey{consumer.Channel, consumer.Tag}
 		if vh.Consumers[key] == consumer {
@@ -335,6 +341,91 @@ func (vh *VHost) removeQueueConsumersLocked(queueName string) {
 		vh.collector.RecordConsumerRemoved(queueName)
 	}
 	delete(vh.ConsumersByQueue, queueName)
+	return removed
+}
+
+// consumerCancels is a batch of server-sent basic.cancel for consumers the
+// broker removed, to send once vh.mu is released (no frame writes under it).
+type consumerCancels struct {
+	sender    FrameSender
+	framer    amqp.Framer
+	consumers []*Consumer
+}
+
+// consumerCancelsLocked prepares the basic.cancel notifications for removed
+// consumers, leaving out those of skipConn (a connection that is closing).
+// The caller holds vh.mu and calls send after releasing it.
+func (vh *VHost) consumerCancelsLocked(removed []*Consumer, skipConn ConnectionID) consumerCancels {
+	cancels := consumerCancels{sender: vh.frameSender, framer: vh.framer}
+	for _, c := range removed {
+		if skipConn != "" && c.ConnectionID == skipConn {
+			continue
+		}
+		cancels.consumers = append(cancels.consumers, c)
+	}
+	return cancels
+}
+
+// cancelNotifyWait bounds how long send waits for the basic.cancel writes.
+const cancelNotifyWait = time.Second
+
+// send writes basic.cancel to each consumer whose client advertised
+// consumer_cancel_notify. Others are not told, as the capability requires.
+// The writes go out on one goroutine per connection, and send waits for
+// them, so they normally precede whatever the caller sends next (such as
+// queue.delete-ok, or a consume-ok reusing the tag). It waits at most
+// cancelNotifyWait: a client that stopped reading must not hold up the
+// queue deletion or connection cleanup that removed its consumers, and
+// frame writes have no deadline yet (#244). Such a client isn't reading
+// what follows either. Known gap: if a single write (e.g. a large delivery
+// to a slow client) takes over cancelNotifyWait, the cancel may still be
+// written after the caller's reply. Closing it needs write deadlines that
+// drop the connection, or one ordered writer per connection (#244).
+func (cc consumerCancels) send() {
+	if cc.sender == nil || cc.framer == nil {
+		return
+	}
+	byConn := make(map[ConnectionID][]*Consumer)
+	for _, c := range cc.consumers {
+		if cc.sender.ConsumerCancelNotify(c.ConnectionID) {
+			byConn[c.ConnectionID] = append(byConn[c.ConnectionID], c)
+		}
+	}
+	if len(byConn) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for connID, consumers := range byConn {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, c := range consumers {
+				frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
+				// Active is already cleared: a delivery that takes sendMu
+				// after this gives up, one holding it is written first.
+				c.sendMu.Lock()
+				err := cc.sender.SendFrame(connID, c.Channel, frame)
+				c.sendMu.Unlock()
+				if err != nil {
+					log.Debug().Err(err).
+						Str("consumer", c.Tag).
+						Uint16("channel", c.Channel).
+						Msg("Failed to send basic.cancel for a removed consumer")
+					return
+				}
+			}
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(cancelNotifyWait):
+		log.Warn().Msg("basic.cancel not written within 1s: a client is not reading")
+	}
 }
 
 // detachQueueDeliveriesLocked marks every unacked delivery of a deleted
@@ -390,7 +481,8 @@ func (vh *VHost) checkAutoDeleteQueueUnlocked(name string) (bool, error) {
 		return false, nil
 	}
 
-	err := vh.deleteQueuebyNameUnlocked(name)
+	// The queue has no consumers left, so none is removed or notified.
+	_, err := vh.deleteQueuebyNameUnlocked(name)
 	if err != nil {
 		return false, err
 	}
@@ -501,7 +593,8 @@ func (vh *VHost) CleanupConnection(connID ConnectionID) {
 
 	// Clean up owned queues
 	// it is expected that some (if not all) exclusive queues were already deleted
-	// during consumer cancellation above
+	// during consumer cancellation above. Consumers of these queues on other
+	// connections, if any, are told; this connection is closing.
 	var queuesToDelete []string
 	for queueName, queue := range vh.Queues {
 		if queue.OwnerConn == connID {
@@ -512,13 +605,18 @@ func (vh *VHost) CleanupConnection(connID ConnectionID) {
 			}
 		}
 	}
+	var removed []*Consumer
 	for _, queueName := range queuesToDelete {
-		if err := vh.deleteQueuebyNameUnlocked(queueName); err != nil {
+		queueConsumers, err := vh.deleteQueuebyNameUnlocked(queueName)
+		removed = append(removed, queueConsumers...)
+		if err != nil {
 			log.Error().Str("queue", queueName).Msg("Error deleting exclusive queue")
 		}
 	}
+	cancels := vh.consumerCancelsLocked(removed, connID)
 	vh.mu.Unlock()
 
+	cancels.send()
 	vh.requeue(work)
 }
 

@@ -164,6 +164,12 @@ func (b *Broker) registerConnection(conn net.Conn, connInfo *amqp.ConnectionInfo
 	b.connectionsMu.Lock()
 	b.connections[connID] = conn
 	b.connToID[conn] = connID
+	if connInfo.Client != nil && connInfo.Client.Config != nil && connInfo.Client.Config.ConsumerCancelNotify {
+		if b.cancelNotify == nil {
+			b.cancelNotify = make(map[vhost.ConnectionID]struct{})
+		}
+		b.cancelNotify[connID] = struct{}{}
+	}
 	b.connectionsMu.Unlock()
 
 	b.collector.RecordConnection()
@@ -187,6 +193,7 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 	connID, hasConnID := b.connToID[conn]
 	delete(b.connections, connID)
 	delete(b.connToID, conn)
+	delete(b.cancelNotify, connID)
 	b.connectionsMu.Unlock()
 
 	// Unblocks this connection's reader, which then exits through its own

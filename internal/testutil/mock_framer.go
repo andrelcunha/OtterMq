@@ -62,6 +62,10 @@ func (m *MockFramer) CreateBasicConsumeOkFrame(channel uint16, consumerTag strin
 	return []byte("basic-consume-ok:" + consumerTag)
 }
 
+func (m *MockFramer) CreateBasicCancelFrame(channel uint16, consumerTag string) []byte {
+	return []byte("basic-cancel:" + consumerTag)
+}
+
 func (m *MockFramer) CreateBasicCancelOkFrame(channel uint16, consumerTag string) []byte {
 	return []byte("basic-cancel-ok:" + consumerTag)
 }

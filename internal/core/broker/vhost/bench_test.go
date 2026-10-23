@@ -155,6 +155,8 @@ func (s *countingSender) SendFrame(connID ConnectionID, channel uint16, _ []byte
 	return nil
 }
 
+func (*countingSender) ConsumerCancelNotify(ConnectionID) bool { return false }
+
 // BenchmarkPublishDeliverAck publishes b.N 1 KiB messages from parallel
 // publishers into one queue and waits until every one has been delivered
 // (and, for manual ack, acked) through the real delivery loop.

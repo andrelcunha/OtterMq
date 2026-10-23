@@ -242,6 +242,7 @@ OtterMq is under active development. All core AMQP 0.9.1 features, RabbitMQ exte
 - Message TTL and Expiration with per-message and per-queue support
 - Queue length limits with dead lettering
 - Priority queues
+- Consumer cancel notification (`consumer_cancel_notify`) when a queue is deleted
 
 Basic compatibility with RabbitMQ clients is functional and tested. See [ROADMAP.md](ROADMAP.md) for detailed development plans.
 

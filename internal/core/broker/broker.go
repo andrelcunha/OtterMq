@@ -33,7 +33,7 @@ const (
 )
 
 // Locks: mu guards vhosts, connInfos and every ConnectionInfo's Channels
-// map. connectionsMu guards connections and connToID. Lock order: a
+// map. connectionsMu guards connections, connToID and cancelNotify. Lock order: a
 // channel's transaction lock (vhost.ChannelTransactionState), then mu, then
 // a vhost's locks (vh.mu, then a channel's delivery state), then
 // connectionsMu, which is always taken last. A transaction commit holds its
@@ -55,8 +55,11 @@ type Broker struct {
 	Ready        chan struct{} // Signals when the broker is ready to accept connections
 	Management   management.ManagementService
 
-	connections   map[vhost.ConnectionID]net.Conn
-	connToID      map[net.Conn]vhost.ConnectionID // Reverse map
+	connections map[vhost.ConnectionID]net.Conn
+	connToID    map[net.Conn]vhost.ConnectionID // Reverse map
+	// Connections whose client advertised consumer_cancel_notify. Created
+	// on first use.
+	cancelNotify  map[vhost.ConnectionID]struct{}
 	connectionsMu sync.RWMutex
 	startedAt     time.Time
 
@@ -775,6 +778,16 @@ func (b *Broker) SendFrame(connID vhost.ConnectionID, channelID uint16, frame []
 	}
 
 	return b.framer.SendFrame(conn, frame)
+}
+
+// ConsumerCancelNotify reports whether the connection's client advertised
+// consumer_cancel_notify. It takes only connectionsMu, so a vhost can call it
+// without the broker lock.
+func (b *Broker) ConsumerCancelNotify(connID vhost.ConnectionID) bool {
+	b.connectionsMu.RLock()
+	defer b.connectionsMu.RUnlock()
+	_, ok := b.cancelNotify[connID]
+	return ok
 }
 
 func (b *Broker) GetBrokerOverviewConfig() models.BrokerConfigOverview {

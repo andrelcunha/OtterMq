@@ -122,6 +122,30 @@ func createBasicConsumeOkFrame(channel uint16, consumerTag string) []byte {
 	return frame
 }
 
+// createBasicCancelFrame builds the basic.cancel the server sends to a
+// consumer it cancelled (consumer_cancel_notify). nowait is set: the client
+// doesn't answer with cancel-ok.
+func createBasicCancelFrame(channel uint16, consumerTag string) []byte {
+	keyValuePairs := []KeyValue{
+		{
+			Key:   STRING_SHORT,
+			Value: consumerTag,
+		},
+		{
+			Key:   BIT,
+			Value: true, // nowait
+		},
+	}
+
+	frame := ResponseMethodMessage{
+		Channel:  channel,
+		ClassID:  uint16(BASIC),
+		MethodID: uint16(BASIC_CANCEL),
+		Content:  ContentList{KeyValuePairs: keyValuePairs},
+	}.FormatMethodFrame()
+	return frame
+}
+
 func createBasicCancelOkFrame(channel uint16, consumerTag string) []byte {
 	keyValuePairs := []KeyValue{
 		{
