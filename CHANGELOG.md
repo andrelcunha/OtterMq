@@ -76,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Unbinding a durable queue from a durable exchange was never saved, so the binding came back after
+  a restart and the queue again received messages for the key it was unbound from. Bindings were
+  also saved and recovered with their exchange's arguments instead of their own. They are now saved
+  with their own arguments, an unbind removes them from disk, and no arguments and an empty
+  arguments table name the same binding (#298).
 - Other connections could consume from, `basic.get` from and redeclare (passively or not) an
   exclusive queue, which belongs to the connection that declared it. They are now refused with a
   405 RESOURCE_LOCKED channel exception, as in RabbitMQ. `queue.delete`, `queue.purge`,
