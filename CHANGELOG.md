@@ -21,12 +21,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bindings and persistent messages in it are lost; users and permissions (`ottermq.db`) are kept.
   Alternatively, keep running v0.21.x until you can recreate them. A data dir with no `vhosts/`
   directory, or an empty one, upgrades without any action.
+- **Web API tokens issued before the upgrade stop working.** `OTTERMQ_JWT_SECRET` no longer
+  defaults to `secret`: if it is unset, a random key is generated on first start and kept in
+  `<OTTERMQ_DATA_DIR>/jwt.key`, so log in again after upgrading. Back that file up with the data
+  dir if tokens should survive a restore (#203).
+- **A weak `OTTERMQ_JWT_SECRET` stops the broker at startup.** `secret` (which the old
+  `docker.env` and `example.env` set explicitly) or anything shorter than 32 bytes is refused.
+  Remove the setting to use a generated key, or set at least 32 random bytes (e.g.
+  `openssl rand -hex 32`). `OTTERMQ_INSECURE_DEV=true` accepts a weak key with a warning, for local
+  development only (#203).
+- **`guest` can only connect from localhost**, over AMQP (`connection.close` 403 ACCESS_REFUSED)
+  and on `/api/login` (401), as in RabbitMQ. Clients on other hosts, including the host side of a
+  Docker container, need their own user: set `OTTERMQ_USERNAME`/`OTTERMQ_PASSWORD` before the first
+  start, or add one with `ottermqadmin users create`. `OTTERMQ_LOOPBACK_USERS` lists the restricted users
+  (default `guest`); set it empty to restore the old behaviour. `docker-compose.yml` now
+  publishes its ports on `127.0.0.1` only (#203).
 
 ### Security
 
 - Upgraded the web stack to versions without the known vulnerabilities our code reaches: Fiber
   2.52.15 (GO-2026-4543, GO-2025-3845, GO-2025-3706), golang-jwt 5.3.1 (GO-2025-3553), plus
   fasthttp 1.76.0 and golang.org/x/crypto 0.58.0. `govulncheck ./...` now reports none (#207).
+- A default install could be taken over by anyone who reached its ports: the bootstrap
+  administrator `guest`/`guest` was accepted from any address, and web API tokens were signed with
+  the key `secret`, so an admin token could be forged without logging in. The signing key is now
+  generated per install, weak configured keys are refused, and `guest` is loopback-only (#203).
 
 ### Changed
 

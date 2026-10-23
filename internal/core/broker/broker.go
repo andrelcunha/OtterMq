@@ -208,6 +208,7 @@ func (b *Broker) handshakeConfig() amqp.HandshakeConfig {
 		Locales:          []string{"en_US"},
 		SSL:              b.config.Ssl,
 		Tuning:           amqp.NewServerTuning(b.config.ChannelMax, b.config.FrameMax, b.config.HeartbeatIntervalMax),
+		LoopbackUsers:    b.config.LoopbackUsers,
 	}
 }
 

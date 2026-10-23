@@ -50,7 +50,12 @@ type Config struct {
 	WebPort   string
 	Username  string
 	Password  string
-	JwtSecret string
+	JwtSecret string // empty: generated and kept in the data dir (see ResolveJwtSecret)
+	// LoopbackUsers may only connect, over AMQP or the web API, from a
+	// loopback address.
+	LoopbackUsers []string
+	// InsecureDev accepts a weak JwtSecret, for local development only.
+	InsecureDev bool
 
 	// Logging
 	LogLevel string
@@ -103,8 +108,11 @@ func LoadConfig(version string) *Config {
 		WebPort:   getEnv("OTTERMQ_WEB_PORT", "3000"),
 		Username:  getEnv("OTTERMQ_USERNAME", "guest"),
 		Password:  getEnv("OTTERMQ_PASSWORD", "guest"),
-		JwtSecret: getEnv("OTTERMQ_JWT_SECRET", "secret"),
+		JwtSecret: getEnv("OTTERMQ_JWT_SECRET", ""),
 		Version:   version,
+
+		LoopbackUsers: loopbackUsersFromEnv(),
+		InsecureDev:   getEnvAsBool("OTTERMQ_INSECURE_DEV", false),
 
 		LogLevel: getEnv("LOG_LEVEL", "info"),
 

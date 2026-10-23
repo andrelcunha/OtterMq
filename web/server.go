@@ -30,6 +30,7 @@ type Config struct {
 	Username      string
 	Password      string
 	JwtKey        string
+	LoopbackUsers []string
 	WebServerPort string
 	EnableUI      bool
 	EnableSwagger bool
@@ -95,7 +96,7 @@ func (ws *WebServer) addUIFallback(app *fiber.App, uiPath string) {
 
 func (ws *WebServer) AddApi(app *fiber.App) {
 	// Public API routes
-	app.Post(ws.config.ApiPrefix+"/login", api_admin.Login(ws.config.JwtKey))
+	app.Post(ws.config.ApiPrefix+"/login", api_admin.Login(ws.config.JwtKey, ws.config.LoopbackUsers))
 
 	app.Get(ws.config.ApiPrefix+"/overview/broker", middleware.JwtMiddleware(ws.config.JwtKey), func(c *fiber.Ctx) error {
 		return api.GetBasicBrokerInfo(c, ws.Broker)

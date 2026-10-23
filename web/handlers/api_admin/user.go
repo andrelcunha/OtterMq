@@ -1,6 +1,10 @@
 package api_admin
 
 import (
+	"fmt"
+	"net"
+	"slices"
+
 	"github.com/ottermq/ottermq/internal/core/models"
 	"github.com/ottermq/ottermq/internal/persistdb"
 	"github.com/gofiber/fiber/v2"
@@ -156,7 +160,10 @@ func ChangePassword(c *fiber.Ctx) error {
 // @Failure 401 {object} models.UnauthorizedErrorResponse "Invalid username or password"
 // @Failure 500 {object} models.ErrorResponse
 // @Router /login [post]
-func Login(jwtSecret string) fiber.Handler {
+//
+// A user in loopbackUsers may only log in from a loopback address: the peer
+// of the socket, not a forwarded-for header.
+func Login(jwtSecret string, loopbackUsers []string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		var req models.AuthRequest
 		if err := c.BodyParser(&req); err != nil {
@@ -168,6 +175,13 @@ func Login(jwtSecret string) fiber.Handler {
 		}
 		if !ok {
 			return c.Status(fiber.StatusUnauthorized).JSON(models.UnauthorizedErrorResponse{Error: "Invalid username or password"})
+		}
+		if slices.Contains(loopbackUsers, req.Username) {
+			if ip := net.ParseIP(c.IP()); ip == nil || !ip.IsLoopback() {
+				return c.Status(fiber.StatusUnauthorized).JSON(models.UnauthorizedErrorResponse{
+					Error: fmt.Sprintf("User '%s' can only log in from localhost", req.Username),
+				})
+			}
 		}
 		// get user
 		persistedUser, err := persistdb.GetUserByUsername(req.Username)

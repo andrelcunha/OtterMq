@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/ottermq/ottermq/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -111,4 +112,33 @@ func TestAdminOnly_ResponseBody_Forbidden(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "Admin access required")
+}
+
+// On a fresh install the signing key is generated, so a token forged with
+// the old default secret "secret" is rejected.
+func TestJwtMiddleware_RejectsOldDefaultSecretOnFreshInstall(t *testing.T) {
+	key, _, err := config.ResolveJwtSecret(&config.Config{DataDir: t.TempDir()})
+	require.NoError(t, err)
+
+	app := fiber.New()
+	app.Use(JwtMiddleware(key))
+	app.Get("/", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+
+	sign := func(secret string) string {
+		claims := jwt.MapClaims{
+			"iss": "ottermq", "sub": 1, "aud": "ottermq",
+			"exp":      jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			"username": "guest", "role": "admin",
+		}
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+		require.NoError(t, err)
+		return signed
+	}
+	for secret, want := range map[string]int{"secret": fiber.StatusUnauthorized, key: fiber.StatusOK} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+sign(secret))
+		resp, err := app.Test(req)
+		require.NoError(t, err)
+		assert.Equal(t, want, resp.StatusCode, "token signed with %q", secret)
+	}
 }

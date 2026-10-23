@@ -43,8 +43,8 @@ func TestLoadConfigWithDefaults(t *testing.T) {
 	if config.WebPort != "3000" {
 		t.Errorf("Expected WebServerPort to be '3000', got '%s'", config.WebPort)
 	}
-	if config.JwtSecret != "secret" {
-		t.Errorf("Expected JwtSecret to be 'secret', got '%s'", config.JwtSecret)
+	if config.JwtSecret != "" {
+		t.Errorf("Expected JwtSecret to be empty (generated at startup), got '%s'", config.JwtSecret)
 	}
 	if config.Version != "test-version" {
 		t.Errorf("Expected Version to be 'test-version', got '%s'", config.Version)
