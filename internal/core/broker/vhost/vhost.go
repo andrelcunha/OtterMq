@@ -21,14 +21,21 @@ const (
 )
 
 type VHost struct {
-	Name               string                     `json:"name"`
-	Id                 string                     `json:"id"`
-	Exchanges          map[string]*Exchange       `json:"exchanges"`
-	Queues             map[string]*Queue          `json:"queues"`
-	Users              map[string]*persistdb.User `json:"users"`
-	mu                 sync.Mutex                 `json:"-"`
-	queueBufferSize    int                        `json:"-"`
-	maxPriority        uint8                      `json:"-"`
+	Name      string                     `json:"name"`
+	Id        string                     `json:"id"`
+	Exchanges map[string]*Exchange       `json:"exchanges"`
+	Queues    map[string]*Queue          `json:"queues"`
+	Users     map[string]*persistdb.User `json:"users"`
+	// mu guards the vhost's maps (queues, exchanges, consumers, channel
+	// state). Lock order: vh.mu, then a ChannelDeliveryState's mu or a
+	// queue's mu, never the reverse. Never hold mu across Queue.Push,
+	// Publish, a frame write or a wait for a delivery loop: Push can
+	// enforce x-max-length and dead-letter, which publishes and takes mu
+	// again, and a delivery loop takes mu while it delivers. Collect the
+	// work under mu and do it after unlocking (see requeue).
+	mu                 sync.Mutex `json:"-"`
+	queueBufferSize    int        `json:"-"`
+	maxPriority        uint8      `json:"-"`
 	persist            persistence.Persistence
 	Consumers          map[ConsumerKey]*Consumer            `json:"consumers"`          // <- Primary registry
 	ConsumersByQueue   map[string][]*Consumer               `json:"consumers_by_queue"` // <- Delivery Index
