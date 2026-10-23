@@ -32,7 +32,9 @@ type VHost struct {
 	// Publish, a frame write or a wait for a delivery loop: Push can
 	// enforce x-max-length and dead-letter, which publishes and takes mu
 	// again, and a delivery loop takes mu while it delivers. Collect the
-	// work under mu and do it after unlocking (see requeue).
+	// work under mu and do it after unlocking (see requeue). A channel's
+	// transaction lock comes before mu: tx.commit holds it while it
+	// publishes, so never take it under mu (see CleanupChannel).
 	mu                 sync.Mutex `json:"-"`
 	queueBufferSize    int        `json:"-"`
 	maxPriority        uint8      `json:"-"`

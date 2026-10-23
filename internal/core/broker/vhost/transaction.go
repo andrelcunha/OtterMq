@@ -6,6 +6,9 @@ import (
 	"github.com/ottermq/ottermq/internal/core/amqp"
 )
 
+// ChannelTransactionState is a channel's tx.select state. Its lock is taken
+// before the broker's mu and vh.mu, never under them: tx.commit holds it
+// while it publishes and resets the channel.
 type ChannelTransactionState struct {
 	mu                sync.Mutex
 	InTransaction     bool

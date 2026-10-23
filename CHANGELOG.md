@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cleaning up a channel's vhost state while that channel ran `tx.commit` deadlocked the vhost, as
+  the two took the vhost lock and the transaction lock in opposite orders. No released code path
+  cleans up a single channel yet, so this is a latent fix ahead of the channel-close cleanup in #219
+  (#311).
 - One client that had stopped reading could stall broker shutdown, and with it new connections and
   the management API: the shutdown `connection.close` was written to every client while holding the
   broker lock, with no time limit. The frames are now sent after the lock is released, with a 1s
