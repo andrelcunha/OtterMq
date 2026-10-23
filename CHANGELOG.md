@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Getting messages through the management API now sizes its result by the number of messages in
+  the queue, not by the requested count, so a very large `message_count` no longer fails the
+  request.
+
 ## [v0.21.1]
 
 > **Not production-ready.** The notice for v0.21.0 still applies: stop-ship issues remain open (see
