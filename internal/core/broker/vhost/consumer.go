@@ -377,7 +377,10 @@ const cancelNotifyWait = time.Second
 // cancelNotifyWait: a client that stopped reading must not hold up the
 // queue deletion or connection cleanup that removed its consumers, and
 // frame writes have no deadline yet (#244). Such a client isn't reading
-// what follows either.
+// what follows either. Known gap: if a single write (e.g. a large delivery
+// to a slow client) takes over cancelNotifyWait, the cancel may still be
+// written after the caller's reply. Closing it needs write deadlines that
+// drop the connection, or one ordered writer per connection (#244).
 func (cc consumerCancels) send() {
 	if cc.sender == nil || cc.framer == nil {
 		return

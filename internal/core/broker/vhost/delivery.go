@@ -100,8 +100,8 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	// Held until the frames are written, so a server-sent basic.cancel for
 	// this consumer (consumerCancels.send) can't overtake this delivery.
 	consumer.sendMu.Lock()
-	defer consumer.sendMu.Unlock()
 	if !consumer.Active.Load() {
+		consumer.sendMu.Unlock()
 		return fmt.Errorf("consumer %s on channel %d is not active", consumer.Tag, consumer.Channel)
 	}
 	channelKey := ConnectionChannelKey{consumer.ConnectionID, consumer.Channel}
@@ -113,6 +113,7 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 	// sees Active cleared here or is detached with the others.
 	if !consumer.Active.Load() {
 		ch.mu.Unlock()
+		consumer.sendMu.Unlock()
 		return fmt.Errorf("consumer %s on channel %d is not active", consumer.Tag, consumer.Channel)
 	}
 	ch.LastDeliveryTag++
@@ -160,7 +161,9 @@ func (vh *VHost) deliverToConsumer(consumer *Consumer, msg Message, redelivered 
 			vh.framer.CreateBodyFrame(consumer.Channel, consumer.FrameMax, msg.Body)...)...)
 
 	// if err := vh.framer.SendFrame(consumer.Connection, frames); err != nil {
-	if err := vh.frameSender.SendFrame(consumer.ConnectionID, consumer.Channel, frames); err != nil {
+	err := vh.frameSender.SendFrame(consumer.ConnectionID, consumer.Channel, frames)
+	consumer.sendMu.Unlock()
+	if err != nil {
 		log.Error().Err(err).Msg("Failed to send frames")
 		if track {
 			ch.mu.Lock()
