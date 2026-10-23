@@ -95,17 +95,16 @@ type BasicProperties struct {
 	Reserved        string         // shortstr
 }
 
-func createBasicQosOkFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createBasicQosOkFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_QOS_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createBasicConsumeOkFrame(channel uint16, consumerTag string) []byte {
+func createBasicConsumeOkFrame(channel uint16, consumerTag string) ([]byte, error) {
 	keyValuePairs := []KeyValue{
 		{
 			Key:   STRING_SHORT,
@@ -113,19 +112,18 @@ func createBasicConsumeOkFrame(channel uint16, consumerTag string) []byte {
 		},
 	}
 
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_CONSUME_OK),
 		Content:  ContentList{KeyValuePairs: keyValuePairs},
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicCancelFrame builds the basic.cancel the server sends to a
 // consumer it cancelled (consumer_cancel_notify). nowait is set: the client
 // doesn't answer with cancel-ok.
-func createBasicCancelFrame(channel uint16, consumerTag string) []byte {
+func createBasicCancelFrame(channel uint16, consumerTag string) ([]byte, error) {
 	keyValuePairs := []KeyValue{
 		{
 			Key:   STRING_SHORT,
@@ -137,16 +135,15 @@ func createBasicCancelFrame(channel uint16, consumerTag string) []byte {
 		},
 	}
 
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_CANCEL),
 		Content:  ContentList{KeyValuePairs: keyValuePairs},
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createBasicCancelOkFrame(channel uint16, consumerTag string) []byte {
+func createBasicCancelOkFrame(channel uint16, consumerTag string) ([]byte, error) {
 	keyValuePairs := []KeyValue{
 		{
 			Key:   STRING_SHORT,
@@ -154,17 +151,16 @@ func createBasicCancelOkFrame(channel uint16, consumerTag string) []byte {
 		},
 	}
 
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_CANCEL_OK),
 		Content:  ContentList{KeyValuePairs: keyValuePairs},
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicReturnFrame creates a Basic.Return (50) frame for the given message.
-func createBasicReturnFrame(channel uint16, replyCode uint16, replyText, exchange, routingKey string) []byte {
+func createBasicReturnFrame(channel uint16, replyCode uint16, replyText, exchange, routingKey string) ([]byte, error) {
 	KeyValuePairs := []KeyValue{
 		{ // reply_code
 			Key:   INT_SHORT,
@@ -185,17 +181,16 @@ func createBasicReturnFrame(channel uint16, replyCode uint16, replyText, exchang
 	}
 	contentList := &ContentList{KeyValuePairs: KeyValuePairs}
 
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_RETURN),
 		Content:  *contentList,
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicDeliverFrame creates a Basic.Deliver (60) frame for the given message and delivery tag.
-func createBasicDeliverFrame(channel uint16, consumerTag, exchange, routingKey string, deliveryTag uint64, redelivered bool) []byte {
+func createBasicDeliverFrame(channel uint16, consumerTag, exchange, routingKey string, deliveryTag uint64, redelivered bool) ([]byte, error) {
 	consumerTagKv := KeyValue{
 		Key:   STRING_SHORT,
 		Value: consumerTag,
@@ -219,17 +214,16 @@ func createBasicDeliverFrame(channel uint16, consumerTag, exchange, routingKey s
 	content := ContentList{
 		KeyValuePairs: []KeyValue{consumerTagKv, deliveryTagKv, redeliveredKv, exchangeKv, routingKeyKv},
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_DELIVER),
 		Content:  content,
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicGetOkFrame creates a Basic.GetOk (71) frame.
-func createBasicGetOkFrame(channel uint16, exchange, routingkey string, msgCount uint32, deliveryTag uint64, redelivered bool) []byte {
+func createBasicGetOkFrame(channel uint16, exchange, routingkey string, msgCount uint32, deliveryTag uint64, redelivered bool) ([]byte, error) {
 	msgGetOk := &BasicGetOkContent{
 		DeliveryTag:  deliveryTag,
 		Redelivered:  redelivered,
@@ -238,40 +232,37 @@ func createBasicGetOkFrame(channel uint16, exchange, routingkey string, msgCount
 		MessageCount: msgCount,
 	}
 
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_GET_OK),
 		Content:  *EncodeGetOkToContentList(msgGetOk),
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicGetEmptyFrame creates a Basic.GetEmpty (72) frame.
-func createBasicGetEmptyFrame(channel uint16) []byte {
+func createBasicGetEmptyFrame(channel uint16) ([]byte, error) {
 	// Send Basic.GetEmpty
 	reserved1 := KeyValue{
 		Key:   STRING_SHORT,
 		Value: "",
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_GET_EMPTY),
 		Content:  ContentList{KeyValuePairs: []KeyValue{reserved1}},
 	}.FormatMethodFrame()
-	return frame
 }
 
 // createBasicRecoverOkFrame creates a Basic.RecoverOk (100) frame.
-func createBasicRecoverOkFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createBasicRecoverOkFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(BASIC),
 		MethodID: uint16(BASIC_RECOVER_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
 func (props *BasicProperties) encodeBasicProperties() ([]byte, uint16, error) {
@@ -280,15 +271,21 @@ func (props *BasicProperties) encodeBasicProperties() ([]byte, uint16, error) {
 
 	if props.ContentType != "" {
 		flags |= (1 << 15)
-		EncodeShortStr(&buf, string(props.ContentType))
+		if err := EncodeShortStr(&buf, string(props.ContentType)); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.ContentEncoding != "" {
 		flags |= (1 << 14)
-		EncodeShortStr(&buf, props.ContentEncoding)
+		if err := EncodeShortStr(&buf, props.ContentEncoding); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.Headers != nil {
 		flags |= (1 << 13)
-		encodeHeaders(&buf, props.Headers)
+		if err := encodeHeaders(&buf, props.Headers); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.DeliveryMode != 0 {
 		flags |= (1 << 12)
@@ -304,19 +301,27 @@ func (props *BasicProperties) encodeBasicProperties() ([]byte, uint16, error) {
 	}
 	if props.CorrelationID != "" {
 		flags |= (1 << 10)
-		EncodeShortStr(&buf, props.CorrelationID)
+		if err := EncodeShortStr(&buf, props.CorrelationID); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.ReplyTo != "" {
 		flags |= (1 << 9)
-		EncodeShortStr(&buf, props.ReplyTo)
+		if err := EncodeShortStr(&buf, props.ReplyTo); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.Expiration != "" {
 		flags |= (1 << 8)
-		EncodeShortStr(&buf, props.Expiration)
+		if err := EncodeShortStr(&buf, props.Expiration); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.MessageID != "" {
 		flags |= (1 << 7)
-		EncodeShortStr(&buf, props.MessageID)
+		if err := EncodeShortStr(&buf, props.MessageID); err != nil {
+			return nil, 0, err
+		}
 	}
 	if !props.Timestamp.IsZero() {
 		flags |= (1 << 6)
@@ -326,19 +331,27 @@ func (props *BasicProperties) encodeBasicProperties() ([]byte, uint16, error) {
 	}
 	if props.Type != "" {
 		flags |= (1 << 5)
-		EncodeShortStr(&buf, props.Type)
+		if err := EncodeShortStr(&buf, props.Type); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.UserID != "" {
 		flags |= (1 << 4)
-		EncodeShortStr(&buf, props.UserID)
+		if err := EncodeShortStr(&buf, props.UserID); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.AppID != "" {
 		flags |= (1 << 3)
-		EncodeShortStr(&buf, props.AppID)
+		if err := EncodeShortStr(&buf, props.AppID); err != nil {
+			return nil, 0, err
+		}
 	}
 	if props.Reserved != "" {
 		flags |= (1 << 2)
-		EncodeShortStr(&buf, props.Reserved)
+		if err := EncodeShortStr(&buf, props.Reserved); err != nil {
+			return nil, 0, err
+		}
 	}
 	return buf.Bytes(), flags, nil
 }

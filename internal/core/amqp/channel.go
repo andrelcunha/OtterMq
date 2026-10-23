@@ -25,8 +25,8 @@ type ChannelFlowOkContent struct {
 	Active bool
 }
 
-func createChannelOpenOkFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createChannelOpenOkFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CHANNEL),
 		MethodID: uint16(CHANNEL_OPEN_OK),
@@ -39,10 +39,9 @@ func createChannelOpenOkFrame(channel uint16) []byte {
 			},
 		},
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createChannelFlowFrame(channel uint16, active bool) []byte {
+func createChannelFlowFrame(channel uint16, active bool) ([]byte, error) {
 	activeKv := KeyValue{
 		Key:   BIT,
 		Value: active,
@@ -50,16 +49,15 @@ func createChannelFlowFrame(channel uint16, active bool) []byte {
 	content := ContentList{
 		KeyValuePairs: []KeyValue{activeKv},
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CHANNEL),
 		MethodID: uint16(CHANNEL_FLOW),
 		Content:  content,
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createChannelFlowOkFrame(channel uint16, active bool) []byte {
+func createChannelFlowOkFrame(channel uint16, active bool) ([]byte, error) {
 	activeKv := KeyValue{
 		Key:   BIT,
 		Value: active,
@@ -67,16 +65,15 @@ func createChannelFlowOkFrame(channel uint16, active bool) []byte {
 	content := ContentList{
 		KeyValuePairs: []KeyValue{activeKv},
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CHANNEL),
 		MethodID: uint16(CHANNEL_FLOW_OK),
 		Content:  content,
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createChannelCloseFrame(channel, replyCode, classID, methodID uint16, replyText string) []byte {
+func createChannelCloseFrame(channel, replyCode, classID, methodID uint16, replyText string) ([]byte, error) {
 	replyCodeKv := KeyValue{
 		Key:   INT_SHORT,
 		Value: replyCode,
@@ -96,23 +93,21 @@ func createChannelCloseFrame(channel, replyCode, classID, methodID uint16, reply
 	content := ContentList{
 		KeyValuePairs: []KeyValue{replyCodeKv, replyTextKv, classIDKv, methodIDKv},
 	}
-	frame := ResponseMethodMessage{
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CHANNEL),
 		MethodID: uint16(CHANNEL_CLOSE),
 		Content:  content,
 	}.FormatMethodFrame()
-	return frame
 }
 
-func createChannelCloseOkFrame(channel uint16) []byte {
-	frame := ResponseMethodMessage{
+func createChannelCloseOkFrame(channel uint16) ([]byte, error) {
+	return ResponseMethodMessage{
 		Channel:  channel,
 		ClassID:  uint16(CHANNEL),
 		MethodID: uint16(CHANNEL_CLOSE_OK),
 		Content:  ContentList{},
 	}.FormatMethodFrame()
-	return frame
 }
 
 func parseChannelMethod(methodID uint16, payload []byte) (interface{}, error) {

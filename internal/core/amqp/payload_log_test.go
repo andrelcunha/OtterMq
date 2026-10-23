@@ -102,7 +102,7 @@ func TestParseMethodFrame_LogsFieldsNotPayload(t *testing.T) {
 		EncodeShortStr(&args, "amq.topic")
 		EncodeShortStr(&args, "orders.created")
 		args.WriteByte(0)
-		EncodeLongStr(&args, EncodeTable(map[string]any{"x-match": "all"}))
+		EncodeLongStr(&args, requireEncoded(t)(EncodeTable(map[string]any{"x-match": "all"})))
 		return args.Bytes()
 	}
 	channelClose := func() []byte {

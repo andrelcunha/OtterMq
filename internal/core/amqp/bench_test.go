@@ -42,11 +42,15 @@ func sizeName(n int) string {
 	}
 }
 
-func benchPublishPayload() []byte {
+func benchPublishPayload(b testing.TB) []byte {
 	var buf bytes.Buffer
 	buf.Write([]byte{0, 0}) // reserved-1
-	EncodeShortStr(&buf, "amq.direct")
-	EncodeShortStr(&buf, "bench.routing.key")
+	if err := EncodeShortStr(&buf, "amq.direct"); err != nil {
+		b.Fatal(err)
+	}
+	if err := EncodeShortStr(&buf, "bench.routing.key"); err != nil {
+		b.Fatal(err)
+	}
 	buf.WriteByte(0) // mandatory, immediate
 	return buf.Bytes()
 }
@@ -70,8 +74,8 @@ func BenchmarkReadFrame(b *testing.B) {
 		name  string
 		frame []byte
 	}{
-		{"method/basic.publish", formatMethodFrame(1, BASIC, TypeMethod(BASIC_PUBLISH), benchPublishPayload())},
-		{"header", createHeaderFrame(1, uint16(BASIC), benchMessage(1024))},
+		{"method/basic.publish", formatMethodFrame(1, BASIC, TypeMethod(BASIC_PUBLISH), benchPublishPayload(b))},
+		{"header", requireEncoded(b)(createHeaderFrame(1, uint16(BASIC), benchMessage(1024)))},
 	}
 	for _, n := range benchPayloadSizes {
 		frames = append(frames, struct {
@@ -101,8 +105,8 @@ func BenchmarkParseFrame(b *testing.B) {
 		name  string
 		frame []byte
 	}{
-		{"method/basic.publish", formatMethodFrame(1, BASIC, TypeMethod(BASIC_PUBLISH), benchPublishPayload())},
-		{"header", createHeaderFrame(1, uint16(BASIC), benchMessage(1024))},
+		{"method/basic.publish", formatMethodFrame(1, BASIC, TypeMethod(BASIC_PUBLISH), benchPublishPayload(b))},
+		{"header", requireEncoded(b)(createHeaderFrame(1, uint16(BASIC), benchMessage(1024)))},
 		{"body/1KiB", createBodyFrame(1, 0, make([]byte, 1<<10))},
 	}
 	for _, f := range frames {
@@ -119,7 +123,7 @@ func BenchmarkParseFrame(b *testing.B) {
 
 func BenchmarkParseBasicPublishFrame(b *testing.B) {
 	muteLogs(b)
-	payload := benchPublishPayload()
+	payload := benchPublishPayload(b)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := parseBasicPublishFrame(payload); err != nil {
@@ -130,7 +134,7 @@ func BenchmarkParseBasicPublishFrame(b *testing.B) {
 
 func BenchmarkParseBasicHeader(b *testing.B) {
 	muteLogs(b)
-	frame := createHeaderFrame(1, uint16(BASIC), benchMessage(1024))
+	frame := requireEncoded(b)(createHeaderFrame(1, uint16(BASIC), benchMessage(1024)))
 	payload := frame[7 : len(frame)-1]
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -145,7 +149,9 @@ func BenchmarkCreateHeaderFrame(b *testing.B) {
 	msg := benchMessage(1024)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = createHeaderFrame(1, uint16(BASIC), msg)
+		if _, err := createHeaderFrame(1, uint16(BASIC), msg); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -167,6 +173,8 @@ func BenchmarkCreateBasicDeliverFrame(b *testing.B) {
 	muteLogs(b)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = createBasicDeliverFrame(1, "ctag-bench", "amq.direct", "bench.routing.key", uint64(i), false)
+		if _, err := createBasicDeliverFrame(1, "ctag-bench", "amq.direct", "bench.routing.key", uint64(i), false); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

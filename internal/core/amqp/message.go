@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -82,19 +81,18 @@ type KeyValue struct {
 	Value interface{}
 }
 
-func (rc ResponseContent) FormatHeaderFrame() []byte {
+func (rc ResponseContent) FormatHeaderFrame() ([]byte, error) {
 	return createHeaderFrame(rc.Channel, rc.ClassID, rc.Message)
 }
 
-func createHeaderFrame(channel, classID uint16, msg Message) []byte {
+func createHeaderFrame(channel, classID uint16, msg Message) ([]byte, error) {
 	frameType := uint8(TYPE_HEADER)
 	var payloadBuf bytes.Buffer
 	weight := uint16(0) // amqp-0-9-1 spec says "weight field is unused and must be zero"
 	bodySize := len(msg.Body)
 	flag_list, flags, err := msg.Properties.encodeBasicProperties()
 	if err != nil {
-		log.Error().Err(err).Msg("Error")
-		return nil
+		return nil, err
 	}
 
 	_ = binary.Write(&payloadBuf, binary.BigEndian, uint16(classID))  // Error ignored as bytes.Buffer.Write never fails
@@ -109,7 +107,7 @@ func createHeaderFrame(channel, classID uint16, msg Message) []byte {
 
 	frame := append(headerBuf, payloadBuf.Bytes()...)
 	frame = append(frame, FRAME_END)
-	return frame
+	return frame, nil
 }
 
 func (rc ResponseContent) FormatBodyFrame(frameMax uint32) []byte {
@@ -140,7 +138,7 @@ func createBodyFrame(channel uint16, frameMax uint32, content []byte) []byte {
 	return out
 }
 
-func (msg ResponseMethodMessage) FormatMethodFrame() []byte {
+func (msg ResponseMethodMessage) FormatMethodFrame() ([]byte, error) {
 	var payloadBuf bytes.Buffer
 	class := msg.ClassID
 	method := msg.MethodID
@@ -151,7 +149,11 @@ func (msg ResponseMethodMessage) FormatMethodFrame() []byte {
 
 	var methodPayload []byte
 	if len(msg.Content.KeyValuePairs) > 0 {
-		methodPayload = formatMethodPayload(msg.Content)
+		var err error
+		methodPayload, err = formatMethodPayload(msg.Content)
+		if err != nil {
+			return nil, err
+		}
 	}
 	payloadBuf.Write(methodPayload)
 
@@ -166,10 +168,10 @@ func (msg ResponseMethodMessage) FormatMethodFrame() []byte {
 
 	frame = append(frame, FRAME_END) // frame-end
 
-	return frame
+	return frame, nil
 }
 
-func formatMethodPayload(content ContentList) []byte {
+func formatMethodPayload(content ContentList) ([]byte, error) {
 	var payloadBuf bytes.Buffer
 	for _, kv := range content.KeyValuePairs {
 		switch kv.Key {
@@ -188,17 +190,22 @@ func formatMethodPayload(content ContentList) []byte {
 				payloadBuf.WriteByte(0)
 			}
 		case STRING_SHORT:
-			EncodeShortStr(&payloadBuf, kv.Value.(string))
+			if err := EncodeShortStr(&payloadBuf, kv.Value.(string)); err != nil {
+				return nil, err
+			}
 		case STRING_LONG:
 			EncodeLongStr(&payloadBuf, kv.Value.([]byte))
 		case TIMESTAMP:
 			_ = binary.Write(&payloadBuf, binary.BigEndian, kv.Value.(int64)) // Error ignored as bytes.Buffer.Write never fails
 		case TABLE:
-			encodedTable := EncodeTable(kv.Value.(map[string]any))
+			encodedTable, err := EncodeTable(kv.Value.(map[string]any))
+			if err != nil {
+				return nil, err
+			}
 			EncodeLongStr(&payloadBuf, encodedTable)
 		}
 	}
-	return payloadBuf.Bytes()
+	return payloadBuf.Bytes(), nil
 }
 
 func formatHeader(frameType uint8, channel uint16, payloadSize uint32) []byte {

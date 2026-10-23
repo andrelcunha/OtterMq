@@ -219,16 +219,25 @@ func (*Broker) ensureInTransaction(txState *vhost.ChannelTransactionState) error
 }
 
 func (b *Broker) createTxSelectOkResponse(channel uint16, conn net.Conn) error {
-	frame := b.framer.CreateTxSelectOkFrame(channel)
+	frame, err := b.framer.CreateTxSelectOkFrame(channel)
+	if err != nil {
+		return err
+	}
 	return b.framer.SendFrame(conn, frame)
 }
 
 func (b *Broker) createTxCommitOkResponse(channel uint16, conn net.Conn) error {
-	frame := b.framer.CreateTxCommitOkFrame(channel)
+	frame, err := b.framer.CreateTxCommitOkFrame(channel)
+	if err != nil {
+		return err
+	}
 	return b.framer.SendFrame(conn, frame)
 }
 
 func (b *Broker) createTxRollbackOkResponse(channel uint16, conn net.Conn) error {
-	frame := b.framer.CreateTxRollbackOkFrame(channel)
+	frame, err := b.framer.CreateTxRollbackOkFrame(channel)
+	if err != nil {
+		return err
+	}
 	return b.framer.SendFrame(conn, frame)
 }

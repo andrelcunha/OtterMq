@@ -75,7 +75,10 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 	}
 
 	if msgCount == 0 || msg == nil {
-		frame := b.framer.CreateBasicGetEmptyFrame(request.Channel)
+		frame, err := b.framer.CreateBasicGetEmptyFrame(request.Channel)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send basic get empty frame")
 		}
@@ -94,12 +97,8 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 	// Check if message should be marked as redelivered
 	redelivered := vh.ShouldRedeliver(msg.ID)
 
-	frame := b.framer.CreateBasicGetOkFrame(request.Channel, msg.Exchange, msg.RoutingKey, uint32(msgCount), deliveryTag, redelivered)
-	err = b.framer.SendFrame(conn, frame)
-	log.Debug().Str("queue", queue).Str("id", msg.ID).Msg("Sent message from queue")
-
+	frame, err := b.framer.CreateBasicGetOkFrame(request.Channel, msg.Exchange, msg.RoutingKey, uint32(msgCount), deliveryTag, redelivered)
 	if err != nil {
-		log.Debug().Err(err).Msg("Error sending frame")
 		return nil, err
 	}
 	responseContent := amqp.ResponseContent{
@@ -108,10 +107,16 @@ func (b *Broker) basicGetHandler(request *amqp.RequestMethodMessage, vh *vhost.V
 		Weight:  0,
 		Message: msg.ToAMQPMessage(),
 	}
-	// Header
-	frame = responseContent.FormatHeaderFrame()
+	header, err := responseContent.FormatHeaderFrame()
+	if err != nil {
+		return nil, err
+	}
 	if err := b.framer.SendFrame(conn, frame); err != nil {
-		log.Error().Err(err).Msg("Failed to send header frame")
+		return nil, err
+	}
+	log.Debug().Str("queue", queue).Str("id", msg.ID).Msg("Sent message from queue")
+	if err := b.framer.SendFrame(conn, header); err != nil {
+		return nil, err
 	}
 	// Body
 	frame = responseContent.FormatBodyFrame(b.negotiatedFrameMax(conn))
@@ -144,7 +149,10 @@ func (b *Broker) basicQoSHandler(request *amqp.RequestMethodMessage, conn net.Co
 		log.Error().Err(err).Msg("Failed to handle basic.qos")
 	}
 
-	frame := b.framer.CreateBasicQosOkFrame(request.Channel)
+	frame, err := b.framer.CreateBasicQosOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
 	if err := b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send basic.qos-ok frame")
 	}
@@ -380,7 +388,10 @@ func (b *Broker) basicCancelHandler(request *amqp.RequestMethodMessage, conn net
 	}
 
 	if !content.NoWait {
-		frame := b.framer.CreateBasicCancelOkFrame(request.Channel, consumerTag)
+		frame, err := b.framer.CreateBasicCancelOkFrame(request.Channel, consumerTag)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send basic cancel ok frame")
 			return nil, err
@@ -425,13 +436,15 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 	if err != nil {
 		// verify if it is a amqp error
 		if amqpErr, ok := err.(*errors.ChannelError); ok {
-			b.sendChannelClosing(conn,
+			if sendErr := b.sendChannelClosing(conn,
 				request.Channel,
 				amqpErr.ReplyCode(),
 				amqpErr.ClassID(),
 				amqpErr.MethodID(),
 				amqpErr.ReplyText(),
-			)
+			); sendErr != nil {
+				return nil, sendErr
+			}
 			// Handled: returning it would also close the connection.
 			return nil, nil
 		}
@@ -444,7 +457,10 @@ func (b *Broker) basicConsumeHandler(request *amqp.RequestMethodMessage, conn ne
 	b.collector.RecordChannelConsumer(connName, vh.Name, user, request.Channel)
 
 	if !noWait {
-		frame := b.framer.CreateBasicConsumeOkFrame(request.Channel, consumerTag)
+		frame, err := b.framer.CreateBasicConsumeOkFrame(request.Channel, consumerTag)
+		if err != nil {
+			return nil, err
+		}
 		if err := b.framer.SendFrame(conn, frame); err != nil {
 			log.Error().Err(err).Msg("Failed to send basic consume ok frame")
 			// Verify if should return error (as channel exception) or just log it
@@ -543,7 +559,10 @@ func (b *Broker) basicRecoverHandler(request *amqp.RequestMethodMessage, conn ne
 		return nil, nil
 	}
 
-	frame := b.framer.CreateBasicRecoverOkFrame(request.Channel)
+	frame, err := b.framer.CreateBasicRecoverOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
 	if err := b.framer.SendFrame(conn, frame); err != nil {
 		log.Error().Err(err).Msg("Failed to send basic recover ok frame")
 		return nil, err
@@ -553,19 +572,18 @@ func (b *Broker) basicRecoverHandler(request *amqp.RequestMethodMessage, conn ne
 }
 
 func (b *Broker) BasicReturn(conn net.Conn, channel uint16, exchange, routingKey string, msg *amqp.Message) (any, error) {
-	frames := append(
-		b.framer.CreateBasicReturnFrame(
-			channel,
-			uint16(amqp.NO_ROUTE),
-			"No route",
-			exchange,
-			routingKey,
-		), append(
-			b.framer.CreateHeaderFrame(channel, uint16(amqp.BASIC), *msg),
-			b.framer.CreateBodyFrame(channel, b.negotiatedFrameMax(conn), msg.Body)...)...)
-
+	method, err := b.framer.CreateBasicReturnFrame(channel, uint16(amqp.NO_ROUTE), "No route", exchange, routingKey)
+	if err != nil {
+		return nil, err
+	}
+	header, err := b.framer.CreateHeaderFrame(channel, uint16(amqp.BASIC), *msg)
+	if err != nil {
+		return nil, err
+	}
+	frames := append(method, header...)
+	frames = append(frames, b.framer.CreateBodyFrame(channel, b.negotiatedFrameMax(conn), msg.Body)...)
 	if err := b.framer.SendFrame(conn, frames); err != nil {
-		log.Error().Err(err).Msg("Failed to send basic return frame")
+		return nil, err
 	}
 	return nil, nil
 }

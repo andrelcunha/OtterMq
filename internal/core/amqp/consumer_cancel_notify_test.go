@@ -8,7 +8,7 @@ import (
 // The server-sent basic.cancel matches the spec: class 60, method 30,
 // consumer-tag shortstr, then the nowait bit set.
 func TestCreateBasicCancelFrame(t *testing.T) {
-	frame := createBasicCancelFrame(3, "ctag-1")
+	frame := requireEncoded(t)(createBasicCancelFrame(3, "ctag-1"))
 
 	want := []byte{
 		1,    // method frame
@@ -38,7 +38,7 @@ func TestCreateBasicCancelFrame(t *testing.T) {
 func TestClientCapability(t *testing.T) {
 	decode := func(t *testing.T, props map[string]any) map[string]any {
 		t.Helper()
-		decoded, err := DecodeTable(EncodeTable(props))
+		decoded, err := DecodeTable(requireEncoded(t)(EncodeTable(props)))
 		if err != nil {
 			t.Fatalf("DecodeTable: %v", err)
 		}

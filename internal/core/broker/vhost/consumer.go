@@ -404,11 +404,15 @@ func (cc consumerCancels) send() {
 		go func() {
 			defer wg.Done()
 			for _, c := range consumers {
-				frame := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
+				frame, err := cc.framer.CreateBasicCancelFrame(c.Channel, c.Tag)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to encode basic.cancel")
+					return
+				}
 				// Active is already cleared: a delivery that takes sendMu
 				// after this gives up, one holding it is written first.
 				c.sendMu.Lock()
-				err := cc.sender.SendFrame(connID, c.Channel, frame)
+				err = cc.sender.SendFrame(connID, c.Channel, frame)
 				c.sendMu.Unlock()
 				if err != nil {
 					log.Debug().Err(err).

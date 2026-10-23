@@ -3,22 +3,27 @@ package amqp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
-func encodeHeaders(buf *bytes.Buffer, table map[string]any) {
+func encodeHeaders(buf *bytes.Buffer, table map[string]any) error {
 	// log.Debug().Interface("headers", table).Msg("Encoding headers in BasicProperties")
-	encodedTable := EncodeTable(table)
+	encodedTable, err := EncodeTable(table)
+	if err != nil {
+		return err
+	}
 	EncodeLongStr(buf, encodedTable)
 	// log.Debug().Int("encoded_size", len(encodedTable)).Msg("Encoded table size")
 	log.Debug().Int("encoded_size", len(encodedTable)).Msg("Encoded headers table")
+	return nil
 }
 
 // encodeValueToBuffer encodes a single AMQP field value into the provided buffer
 // by selecting the appropriate type encoding based on the value's Go type.
-func encodeValueToBuffer(value any, buf *bytes.Buffer) {
+func encodeValueToBuffer(value any, buf *bytes.Buffer) error {
 	switch v := value.(type) {
 	case bool:
 		buf.WriteByte('t')
@@ -82,7 +87,10 @@ func encodeValueToBuffer(value any, buf *bytes.Buffer) {
 	case map[string]any:
 		log.Trace().Msg("Encoding map[string]any")
 		buf.WriteByte('F') // Field value type 'F' (field table)
-		data := EncodeTable(v)
+		data, err := EncodeTable(v)
+		if err != nil {
+			return err
+		}
 		_ = binary.Write(buf, binary.BigEndian, uint32(len(data)))
 		buf.Write(data)
 
@@ -92,7 +100,10 @@ func encodeValueToBuffer(value any, buf *bytes.Buffer) {
 		for i, item := range v {
 			arr[i] = item
 		}
-		data := EncodeArray(arr)
+		data, err := EncodeArray(arr)
+		if err != nil {
+			return err
+		}
 		_ = binary.Write(buf, binary.BigEndian, uint32(len(data)))
 		buf.Write(data)
 
@@ -103,7 +114,10 @@ func encodeValueToBuffer(value any, buf *bytes.Buffer) {
 		for i, item := range v {
 			arr[i] = item
 		}
-		data := EncodeArray(arr)
+		data, err := EncodeArray(arr)
+		if err != nil {
+			return err
+		}
 		_ = binary.Write(buf, binary.BigEndian, uint32(len(data)))
 		buf.Write(data)
 
@@ -116,7 +130,10 @@ func encodeValueToBuffer(value any, buf *bytes.Buffer) {
 	case []any:
 		log.Trace().Msg("Encoding []any array")
 		buf.WriteByte('A') // Array
-		data := EncodeArray(v)
+		data, err := EncodeArray(v)
+		if err != nil {
+			return err
+		}
 		_ = binary.Write(buf, binary.BigEndian, uint32(len(data)))
 		buf.Write(data)
 
@@ -124,26 +141,33 @@ func encodeValueToBuffer(value any, buf *bytes.Buffer) {
 		log.Warn().Interface("value", v).Msg("Unsupported AMQP field value type, encoding as null")
 		buf.WriteByte('V') // Void/null type
 	}
+	return nil
 }
 
 // EncodeTable encodes a proper AMQP field table
-func EncodeTable(table map[string]any) []byte {
+func EncodeTable(table map[string]any) ([]byte, error) {
 	var buf bytes.Buffer
 	for key, value := range table {
-		EncodeShortStr(&buf, key) // Encode the field name as short string
-		encodeValueToBuffer(value, &buf)
+		if err := EncodeShortStr(&buf, key); err != nil {
+			return nil, fmt.Errorf("encode field name: %w", err)
+		}
+		if err := encodeValueToBuffer(value, &buf); err != nil {
+			return nil, err
+		}
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
-func EncodeArray(arr []any) []byte {
+func EncodeArray(arr []any) ([]byte, error) {
 	var arrContent bytes.Buffer
 	for _, item := range arr {
 		itemBuf := bytes.Buffer{}
-		encodeValueToBuffer(item, &itemBuf)
+		if err := encodeValueToBuffer(item, &itemBuf); err != nil {
+			return nil, err
+		}
 		arrContent.Write(itemBuf.Bytes())
 	}
-	return arrContent.Bytes()
+	return arrContent.Bytes(), nil
 }
 
 func EncodeLongStr(buf *bytes.Buffer, data []byte) {
@@ -151,9 +175,13 @@ func EncodeLongStr(buf *bytes.Buffer, data []byte) {
 	buf.Write(data)
 }
 
-func EncodeShortStr(buf *bytes.Buffer, data string) {
+func EncodeShortStr(buf *bytes.Buffer, data string) error {
+	if len(data) > 255 {
+		return fmt.Errorf("AMQP shortstr length %d exceeds 255 bytes", len(data))
+	}
 	_ = buf.WriteByte(byte(len(data)))
-	buf.WriteString(data)
+	_, _ = buf.WriteString(data)
+	return nil
 }
 
 func EncodeOctet(buf *bytes.Buffer, value uint8) error {

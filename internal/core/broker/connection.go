@@ -133,13 +133,17 @@ func (b *Broker) handleConnection(conn net.Conn, connInfo *amqp.ConnectionInfo) 
 			}
 			request := newState.MethodFrame
 
-			b.sendConnectionClosing(conn,
+			if _, sendErr := b.sendConnectionClosing(conn,
 				request.Channel,
 				uint16(amqp.INTERNAL_ERROR),
 				uint16(request.ClassID),
 				uint16(request.MethodID),
 				err.Error(),
-			)
+			); sendErr != nil {
+				log.Error().Err(sendErr).Msg("Failed to send connection.close")
+				client.Cancel()
+				return
+			}
 			b.setConnectionClosingState(conn)
 		}
 	}
@@ -211,8 +215,11 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 
 // closeConnectionRequested closes a connection and sends a CONNECTION_CLOSE_OK frame
 func (b *Broker) closeConnectionRequested(request *amqp.RequestMethodMessage, conn net.Conn) (any, error) {
-	frame := b.framer.CreateConnectionCloseOkFrame(request.Channel)
-	err := b.framer.SendFrame(conn, frame)
+	frame, err := b.framer.CreateConnectionCloseOkFrame(request.Channel)
+	if err != nil {
+		return nil, err
+	}
+	err = b.framer.SendFrame(conn, frame)
 	b.mu.Lock()
 	connInfo, exists := b.connInfos[conn]
 	if !exists {
@@ -236,8 +243,11 @@ func (b *Broker) isConnectionClosing(conn net.Conn) (bool, error) {
 
 // sendConnectionClosing sends `connection.close` when the server needs to shutdown for some reason
 func (b *Broker) sendConnectionClosing(conn net.Conn, channel, replyCode, methodId, classId uint16, replyText string) (any, error) {
-	frame := b.framer.CreateConnectionCloseFrame(channel, replyCode, methodId, classId, replyText)
-	err := b.framer.SendFrame(conn, frame)
+	frame, err := b.framer.CreateConnectionCloseFrame(channel, replyCode, methodId, classId, replyText)
+	if err != nil {
+		return nil, err
+	}
+	err = b.framer.SendFrame(conn, frame)
 
 	return nil, err
 }
@@ -332,6 +342,9 @@ func (b *Broker) sendChannelClosing(conn net.Conn, channel, replyCode, classId, 
 	// RabbitMQ. Methods the client sends before its close-ok are ignored;
 	// the transaction state is dropped when close-ok arrives.
 	b.releaseChannelDeliveries(conn, channel)
-	frame := b.framer.CreateChannelCloseFrame(channel, replyCode, classId, methodId, replyText)
+	frame, err := b.framer.CreateChannelCloseFrame(channel, replyCode, classId, methodId, replyText)
+	if err != nil {
+		return err
+	}
 	return b.framer.SendFrame(conn, frame)
 }

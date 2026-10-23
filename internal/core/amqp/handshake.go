@@ -213,7 +213,11 @@ func sendHandshakeClose(conn net.Conn, replyCode ReplyCode, methodID uint16, tex
 	if methodID != 0 {
 		classID = uint16(CONNECTION)
 	}
-	frame := createConnectionCloseFrame(0, uint16(replyCode), classID, methodID, text)
+	frame, err := createConnectionCloseFrame(0, uint16(replyCode), classID, methodID, text)
+	if err != nil {
+		log.Debug().Err(err).Msg("Failed to encode connection.close during handshake")
+		return
+	}
 	if err := sendFrame(conn, frame); err != nil {
 		log.Debug().Err(err).Msg("Failed to send connection.close during handshake")
 	}
