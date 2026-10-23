@@ -550,6 +550,7 @@ func (vh *VHost) deleteQueuebyNameUnlocked(name string) error {
 	// Remove the queue from the VHost's queue map
 	delete(vh.Queues, name)
 	vh.removeQueueConsumersLocked(name)
+	vh.detachQueueDeliveriesLocked(name)
 	vh.collector.RemoveQueue(queue.Name)
 	log.Debug().Str("queue", name).Msg("Deleted queue")
 

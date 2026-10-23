@@ -14,6 +14,10 @@ type DeliveryRecord struct {
 	QueueName   string
 	Message     Message
 	Persistent  bool
+	// QueueDeleted is set, under the channel state's mu, once the queue is
+	// deleted. Such a delivery can still be acked, but is never requeued or
+	// dead-lettered: another queue may have taken the name.
+	QueueDeleted bool
 }
 
 type ChannelDeliveryState struct {

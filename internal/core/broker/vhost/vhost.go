@@ -18,6 +18,12 @@ const (
 	// (synchronous pull mode) which don't have an associated consumer. This allows
 	// us to track these deliveries separately in the dual-index UnackedByConsumer map.
 	BASIC_GET_SENTINEL = "__basic_get__"
+
+	// DELETED_QUEUE_SENTINEL is the ConsumerTag of unacked deliveries whose
+	// queue was deleted. They are moved out of their consumer's entry in
+	// UnackedByConsumer, so a new consumer reusing the tag doesn't inherit
+	// them, and stay in UnackedByTag so the client can still ack them.
+	DELETED_QUEUE_SENTINEL = "__deleted_queue__"
 )
 
 type VHost struct {

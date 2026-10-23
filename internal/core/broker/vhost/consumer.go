@@ -314,8 +314,8 @@ func (vh *VHost) cancelConsumerLocked(key ConsumerKey, consumer *Consumer) []req
 // removeQueueConsumersLocked drops the consumers of a deleted queue from
 // every index. They are keyed by queue name, so left in place they would be
 // counted and delivered to by a queue later declared with the same name.
-// Their unacked deliveries stay on their channels, so the client can still
-// ack them. The caller holds vh.mu.
+// Their unacked deliveries are handled by detachQueueDeliveriesLocked. The
+// caller holds vh.mu.
 // TODO: send basic.cancel to clients that advertise consumer_cancel_notify.
 func (vh *VHost) removeQueueConsumersLocked(queueName string) {
 	for _, consumer := range vh.ConsumersByQueue[queueName] {
@@ -335,6 +335,34 @@ func (vh *VHost) removeQueueConsumersLocked(queueName string) {
 		vh.collector.RecordConsumerRemoved(queueName)
 	}
 	delete(vh.ConsumersByQueue, queueName)
+}
+
+// detachQueueDeliveriesLocked marks every unacked delivery of a deleted
+// queue as such and files it under DELETED_QUEUE_SENTINEL. The client can
+// still ack it; nothing requeues it into a queue that later takes the name.
+// The caller holds vh.mu.
+func (vh *VHost) detachQueueDeliveriesLocked(queueName string) {
+	for _, state := range vh.ChannelDeliveries {
+		state.mu.Lock()
+		for deliveryTag, record := range state.UnackedByTag {
+			if record.QueueName != queueName || record.QueueDeleted {
+				continue
+			}
+			record.QueueDeleted = true
+			if byConsumer := state.UnackedByConsumer[record.ConsumerTag]; byConsumer != nil {
+				delete(byConsumer, deliveryTag)
+				if len(byConsumer) == 0 {
+					delete(state.UnackedByConsumer, record.ConsumerTag)
+				}
+			}
+			record.ConsumerTag = DELETED_QUEUE_SENTINEL
+			if state.UnackedByConsumer[DELETED_QUEUE_SENTINEL] == nil {
+				state.UnackedByConsumer[DELETED_QUEUE_SENTINEL] = make(map[uint64]*DeliveryRecord)
+			}
+			state.UnackedByConsumer[DELETED_QUEUE_SENTINEL][deliveryTag] = record
+		}
+		state.mu.Unlock()
+	}
 }
 
 // takeUnackedForConsumer removes a consumer's unacked deliveries from the
@@ -393,7 +421,7 @@ func (vh *VHost) CleanupChannel(connID ConnectionID, channel uint16) {
 		byQueue := make(map[string]int) // queue name -> index in work
 		for _, record := range unackedMessages {
 			queue, exists := vh.Queues[record.QueueName]
-			if !exists {
+			if !exists || record.QueueDeleted {
 				continue
 			}
 			i, seen := byQueue[record.QueueName]

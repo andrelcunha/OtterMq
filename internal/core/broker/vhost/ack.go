@@ -32,6 +32,10 @@ func (vh *VHost) HandleBasicAck(connID ConnectionID, channel uint16, deliveryTag
 
 	connName := connID.String()
 	for _, rec := range toDelete {
+		if rec.QueueDeleted {
+			vh.collector.RecordChannelAck(connName, vh.Name, channel)
+			continue
+		}
 		vh.collector.RecordQueueAck(rec.QueueName)
 		vh.collector.RecordChannelAck(connName, vh.Name, channel)
 		if rec.Persistent && vh.persist != nil {
@@ -131,6 +135,9 @@ func (vh *VHost) handleBasicNack(connID ConnectionID, channel uint16, deliveryTa
 
 	if requeue {
 		for _, record := range recordsToNack {
+			if record.QueueDeleted {
+				continue
+			}
 			vh.mu.Lock()
 			queue := vh.Queues[record.QueueName]
 			vh.mu.Unlock()
@@ -149,6 +156,9 @@ func (vh *VHost) handleBasicNack(connID ConnectionID, channel uint16, deliveryTa
 	}
 	// Dead-letter or discard the messages
 	for _, record := range recordsToNack {
+		if record.QueueDeleted {
+			continue
+		}
 		// Check if DLX extension is enabled and queue has DLX configured
 		// DLX properties comes directly from arguments: single source of truth
 		vh.mu.Lock()
