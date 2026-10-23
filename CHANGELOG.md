@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `basic.cancel` requeued the consumer's unacked messages, so they were delivered again, and
+  acking them afterwards closed the channel with 406 PRECONDITION_FAILED (unknown delivery tag).
+  The cancel now only stops new deliveries, as in AMQP and RabbitMQ: messages already delivered
+  stay unacked on the channel, can be acked, nacked or rejected, and are requeued on channel
+  close, connection close or `basic.recover`. A new consumer reusing the tag doesn't inherit them
+  in its prefetch (#299).
+- `basic.recover` and `basic.recover-async` from a client failed to parse (the broker expected 9
+  bytes of arguments instead of 1) and dropped the connection with 501 FRAME_ERROR.
 - Closing a channel, from the client or by the broker after a channel exception, left its
   consumers running and its unacked messages assigned to it. The broker kept delivering to the
   closed channel, and amqp091-go clients dropped the whole connection with 504 CHANNEL_ERROR.

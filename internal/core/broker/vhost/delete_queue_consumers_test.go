@@ -53,8 +53,8 @@ func TestDeletedQueueConsumersDoNotCarryOverToRecreatedQueue(t *testing.T) {
 
 // A deleted queue's unacked deliveries stay ackable, but don't follow the
 // consumer tag: a new consumer on the same channel and tag, on another queue,
-// isn't held back by them under its prefetch, and canceling it doesn't move
-// them into its queue (#312).
+// isn't held back by them under its prefetch, and recovering after it is
+// cancelled doesn't move them into its queue (#312).
 func TestDeletedQueueDeliveriesDoNotFollowReusedConsumerTag(t *testing.T) {
 	sender := newGateSender(false)
 	vh := newLoopTestVHost(t, sender)
@@ -92,21 +92,26 @@ func TestDeletedQueueDeliveriesDoNotFollowReusedConsumerTag(t *testing.T) {
 		t.Fatal("the new consumer (prefetch 1) got nothing: the deleted queue's delivery counts against it")
 	}
 
+	// Cancelling it keeps its delivery on the channel (#299), and the client
+	// can still ack the deleted queue's delivery.
 	if err := vh.CancelConsumer(1, "c"); err != nil {
 		t.Fatalf("CancelConsumer: %v", err)
+	}
+	if err := vh.HandleBasicAck(connID, 1, 1, false); err != nil {
+		t.Errorf("ack of the deleted queue's delivery: %v", err)
+	}
+	// basic.recover requeues the cancelled consumer's delivery into b.
+	if err := vh.HandleBasicRecover(connID, 1, true); err != nil {
+		t.Fatalf("HandleBasicRecover: %v", err)
 	}
 	if !waitFor(time.Second, func() bool { return b.Len() >= 1 }) {
 		t.Fatal("the new consumer's unacked message was not requeued to b")
 	}
 	time.Sleep(50 * time.Millisecond)
 	if n := b.Len(); n != 1 {
-		t.Errorf("b holds %d messages after the cancel, want 1: the deleted queue's message moved into it", n)
+		t.Errorf("b holds %d messages after the recover, want 1", n)
 	}
 
-	// The client can still ack the deleted queue's delivery.
-	if err := vh.HandleBasicAck(connID, 1, 1, false); err != nil {
-		t.Errorf("ack of the deleted queue's delivery: %v", err)
-	}
 }
 
 // A delivery in flight when its queue is deleted, whose send then fails, is

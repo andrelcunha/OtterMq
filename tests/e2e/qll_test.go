@@ -250,6 +250,9 @@ func TestMaxLen_RequeueRespected(t *testing.T) {
 	// Cancel the first consumer using its generated tag to prevent it from consuming remaining messages
 	err = tc.Ch.Cancel(msg.ConsumerTag, false)
 	require.NoError(t, err)
+	// The cancel keeps the consumer's deliveries unacked (#299); put them
+	// back so the queue is full again.
+	require.NoError(t, tc.Ch.Recover(true))
 
 	time.Sleep(100 * time.Millisecond)
 

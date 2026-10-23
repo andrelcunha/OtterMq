@@ -22,6 +22,12 @@ type DeliveryRecord struct {
 	// deleted. Such a delivery can still be acked, but is never requeued or
 	// dead-lettered: another queue may have taken the name.
 	QueueDeleted bool
+	// ConsumerCancelled is set, under the channel state's mu, once the
+	// consumer is cancelled. The delivery stays unacked on the channel (it
+	// can be acked, nacked or rejected) but is dropped from
+	// UnackedByConsumer, so a consumer reusing the tag doesn't inherit it.
+	// It is requeued on channel or connection close and on basic.recover.
+	ConsumerCancelled bool
 }
 
 type ChannelDeliveryState struct {
@@ -30,7 +36,8 @@ type ChannelDeliveryState struct {
 
 	// Indexes of unacked messages. Every delivery is in UnackedByTag, and
 	// also in UnackedByConsumer (consumer deliveries) or UnackedByGet
-	// (basic.get deliveries), until its queue is deleted (see
+	// (basic.get deliveries), until its consumer is cancelled (see
+	// detachConsumerDeliveries) or its queue is deleted (see
 	// detachQueueDeliveriesLocked).
 	// By consumer tag, for prefetch and for requeuing on cancel.
 	UnackedByConsumer map[string]map[uint64]*DeliveryRecord // consumerTag -> (deliveryTag -> DeliveryRecord)

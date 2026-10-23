@@ -59,9 +59,10 @@ func TestConsumerTaggedBasicGetPrefetchCountsOnlyItsDeliveries(t *testing.T) {
 	}
 }
 
-// Cancelling a consumer tagged like the old sentinel requeues its own
-// deliveries only; the channel's basic.get deliveries stay unacked (#321).
-func TestCancelConsumerTaggedBasicGetRequeuesOnlyItsDeliveries(t *testing.T) {
+// Cancelling a consumer tagged like the old sentinel leaves the channel's
+// basic.get deliveries alone (#321). Its own deliveries stay unacked (#299),
+// and closing the channel requeues each delivery into its own queue.
+func TestCancelConsumerTaggedBasicGetLeavesGetDeliveries(t *testing.T) {
 	sender := newGateSender(false)
 	vh := newLoopTestVHost(t, sender)
 	connID := newTestConsumerConnID()
@@ -71,7 +72,7 @@ func TestCancelConsumerTaggedBasicGetRequeuesOnlyItsDeliveries(t *testing.T) {
 		t.Fatalf("CreateQueue g: %v", err)
 	}
 	g.Push(Message{ID: "got"})
-	getTag := basicGet(t, vh, connID, 1, "g")
+	basicGet(t, vh, connID, 1, "g")
 
 	q, err := vh.CreateQueue("q", plainQueueProps(), connID)
 	if err != nil {
@@ -89,18 +90,17 @@ func TestCancelConsumerTaggedBasicGetRequeuesOnlyItsDeliveries(t *testing.T) {
 	if err := vh.CancelConsumer(1, formerBasicGetTag); err != nil {
 		t.Fatalf("CancelConsumer: %v", err)
 	}
-	if !waitFor(time.Second, func() bool { return q.Len() >= 1 }) {
-		t.Fatal("the consumer's unacked message was not requeued to q")
-	}
 	time.Sleep(50 * time.Millisecond)
-	if n := q.Len(); n != 1 {
-		t.Errorf("q holds %d messages after the cancel, want 1: the basic.get delivery moved into it", n)
+	if q.Len() != 0 || g.Len() != 0 {
+		t.Fatalf("after the cancel q holds %d and g %d, want 0 and 0: nothing is requeued", q.Len(), g.Len())
 	}
-	if n := g.Len(); n != 0 {
-		t.Errorf("g holds %d messages after the cancel, want 0: the basic.get delivery was requeued", n)
+
+	vh.CleanupChannel(connID, 1)
+	if q.Len() != 1 {
+		t.Errorf("q holds %d messages after channel close, want 1", q.Len())
 	}
-	if err := vh.HandleBasicAck(connID, 1, getTag, false); err != nil {
-		t.Errorf("ack of the basic.get delivery after the cancel: %v", err)
+	if g.Len() != 1 {
+		t.Errorf("g holds %d messages after channel close, want 1", g.Len())
 	}
 }
 
