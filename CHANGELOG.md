@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pins the toolchain to Go 1.27.3, which CI uses, and the Docker image builds with
   `golang:1.27-alpine` instead of an unpinned `golang:alpine` (#207).
 
+### Removed
+
+- `Broker.ListVhostDetails`, which nothing called and which would have deadlocked the broker on its
+  first call, since it took the broker lock twice (#314).
+
 ### Fixed
 
 - A crash during the first start, or two brokers starting at once on a fresh data dir, could
